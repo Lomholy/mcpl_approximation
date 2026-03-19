@@ -12,7 +12,7 @@ batch_size = 2048
 epochs = 50
 
 vae = VAE().to(device)
-optimizer = torch.optim.Adam(vae.parameters(), weight_decay=1e-2, lr=5e-5)
+optimizer = torch.optim.Adam(vae.parameters(), weight_decay=1e-4, lr=1e-3)
 
 mcplfile = mcpl.MCPLFile("../ODIN.mcpl.gz")
 n_blocks = 10
