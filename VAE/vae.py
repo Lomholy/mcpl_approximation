@@ -9,13 +9,13 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 device = "mps"
 batch_size = 2048
-epochs = 50
+epochs = 20
 
 vae = VAE().to(device)
-optimizer = torch.optim.Adam(vae.parameters(), weight_decay=1e-4, lr=1e-3)
+optimizer = torch.optim.Adam(vae.parameters(), weight_decay=0, lr=1e-3)
 
 mcplfile = mcpl.MCPLFile("../ODIN.mcpl.gz")
-n_blocks = 10
+n_blocks = 100
 data = torch.zeros([n_blocks * 10000, 6], dtype=torch.float32)
 
 for i, p in enumerate(mcplfile.particle_blocks):

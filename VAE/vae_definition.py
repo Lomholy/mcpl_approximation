@@ -2,32 +2,17 @@ import torch
 from torch.nn import functional as F
 from torch import nn as nn
 
-
 def vae_loss(recon_x, x, mu, logvar):
-    recon = F.mse_loss(recon_x, x, reduction="mean")
-    kl = F.kl_div(recon_x, x)
+    recon = F.mse_loss(recon_x, x)
+    kl = F.kl_div(recon_x, x) + 1
     loss = recon + kl
-    # print(f'Loss: recon: {recon}\t KL: {kl}')
+    print(f'Loss: recon: {recon}\t KL: {kl}')
 
     return loss
 
 
-def gaussian_nll(mu_x, logvar_x, x):
-    return 0.5 * torch.sum(
-        logvar_x
-        + (x - mu_x) ** 2 / torch.exp(logvar_x)
-        + torch.log(torch.tensor(2 * 3.141592653589793))
-    )
-
-
-def vae_loss_gauss(mu_x, logvar_x, x, mu, logvar):
-    recon = gaussian_nll(mu_x, logvar_x, x)
-    kl = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-    return recon + kl
-
-
 class VAE(nn.Module):
-    def __init__(self, input_dim=6, latent_dim=4, out_act="sigmoid"):
+    def __init__(self, input_dim=6, latent_dim=24, out_act="sigmoid"):
         super().__init__()
         self.input_dim = input_dim
         self.latent_dim = latent_dim
@@ -40,6 +25,10 @@ class VAE(nn.Module):
             nn.Linear(16, 32),
             nn.ReLU(),
             nn.Linear(32, 64),
+            nn.ReLU(),
+            nn.Linear(64,128),
+            nn.ReLU(),
+            nn.Linear(128,64),
             nn.ReLU(),
             nn.Linear(64, 32),
             nn.ReLU(),
@@ -58,6 +47,10 @@ class VAE(nn.Module):
             nn.Linear(32, 32),
             nn.ReLU(),
             nn.Linear(32, 64),
+            nn.ReLU(),
+            nn.Linear(64,128),
+            nn.ReLU(),
+            nn.Linear(128,64),
             nn.ReLU(),
             nn.Linear(64, 32),
             nn.ReLU(),
