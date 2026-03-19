@@ -26,7 +26,7 @@ def vae_loss_gauss(mu_x, logvar_x, x, mu, logvar):
 
 
 class VAE(nn.Module):
-    def __init__(self, input_dim=8, latent_dim=32, out_act="sigmoid"):
+    def __init__(self, input_dim=6, latent_dim=32, out_act="sigmoid"):
         super().__init__()
         self.input_dim = input_dim
         self.latent_dim = latent_dim

@@ -9,22 +9,22 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 device = "mps"
 batch_size = 2048
-epochs = 5
+epochs = 50
 
 vae = VAE().to(device)
-optimizer = torch.optim.Adam(vae.parameters(), weight_decay=1e-2, lr=1e-4)
+optimizer = torch.optim.Adam(vae.parameters(), weight_decay=1e-2, lr=5e-5)
 
-mcplfile = mcpl.MCPLFile("./ODIN.mcpl.gz")
-n_blocks = 100
-data = torch.zeros([n_blocks * 10000, 8], dtype=torch.float32)
+mcplfile = mcpl.MCPLFile("../ODIN.mcpl.gz")
+n_blocks = 10
+data = torch.zeros([n_blocks * 10000, 6], dtype=torch.float32)
 
 for i, p in enumerate(mcplfile.particle_blocks):
     data[i * 10000 : (i + 1) * 10000, 0] = torch.asarray(p.weight)
     data[i * 10000 : (i + 1) * 10000, 1] = torch.asarray(p.ekin)
-    data[i * 10000 : (i + 1) * 10000, 2:5] = torch.asarray(
-        np.array([p.ux, p.uy, p.uz])
+    data[i * 10000 : (i + 1) * 10000, 2:4] = torch.asarray(
+        np.array([np.atan2(p.uy,p.ux), np.atan2(p.ux,p.uz)])
     ).T
-    data[i * 10000 : (i + 1) * 10000, 5:] = torch.asarray(np.array([p.x, p.y, p.z])).T
+    data[i * 10000 : (i + 1) * 10000, 4:] = torch.asarray(np.array([p.x, p.y])).T
     if i == n_blocks - 1:
         break
 
@@ -50,7 +50,7 @@ for epoch in range(epochs):
 
         losses.append(loss.item())
     if epoch % 1 == 0:
-        print(epoch, loss.item())
+        print(f'Epoch: {epoch}\tLoss: {loss.item()}\t')
 
 torch.save(
     {
