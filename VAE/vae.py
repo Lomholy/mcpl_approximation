@@ -38,10 +38,11 @@ loader = DataLoader(TensorDataset(data), batch_size=batch_size, shuffle=True)
 
 losses = []
 for epoch in range(epochs):
+    kl_weight = 0.05
     for (x,) in loader:
         x = x.to(device)
         recon, mu, logvar = vae(x)
-        loss, recon_loss, kl_loss = vae_loss(recon, x, mu, logvar)
+        loss, recon_loss, kl_loss = vae_loss(recon, x, mu, logvar, kl_weight=kl_weight)
 
         optimizer.zero_grad()
         loss.backward()

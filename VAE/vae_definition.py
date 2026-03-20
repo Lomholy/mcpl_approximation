@@ -2,8 +2,7 @@ import torch
 from torch.nn import functional as F
 from torch import nn as nn
 
-def vae_loss(recon_x, x, mu, logvar):
-    kl_weight = 0.01
+def vae_loss(recon_x, x, mu, logvar, kl_weight):
     # Latent (KL divergence) loss
     latent_loss = 0.5 * torch.mean(torch.exp(logvar) + mu**2 - 1 - logvar)
 
