@@ -16,7 +16,7 @@ def vae_loss(recon_x, x, mu, logvar, kl_weight):
 
 
 class VAE(nn.Module):
-    def __init__(self, input_dim=4, latent_dim=48, out_act="sigmoid"):
+    def __init__(self, input_dim=7, latent_dim=48, out_act="sigmoid"):
         super().__init__()
         self.input_dim = input_dim
         self.latent_dim = latent_dim
