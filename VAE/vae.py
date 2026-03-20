@@ -46,7 +46,8 @@ val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
 
 best_val = float("inf")
 no_improve = 0
-losses = []
+train_losses = []
+val_losses = []
 for epoch in range(epochs):
     kl_weight = 0.05
     vae.train()
@@ -59,18 +60,18 @@ for epoch in range(epochs):
         loss.backward()
         optimizer.step()
 
-        losses.append(loss.item())
+        train_losses.append(loss.item())
 
     vae.eval()
-    val_losses = []
+    val_losses_batch = []
     with torch.no_grad():
         for (xv,) in val_loader:
             xv = xv.to(device)
             recon, mu, logvar = vae(xv)
             vloss, _, _ = vae_loss(recon, xv, mu, logvar, kl_weight=kl_weight)
-            val_losses.append(vloss.item())
-    val_mean = np.mean(val_losses)
-
+            val_losses_batch.append(vloss.item())
+    val_mean = np.mean(val_losses_batch)
+    val_losses.append(val_mean)
     print(f"Epoch {epoch}  train={loss.item():.4g}  val={val_mean:.4g}")
 
     if val_mean < best_val:
@@ -91,4 +92,5 @@ for epoch in range(epochs):
             print("Early stopping.")
             break
 
-np.save("vae_losses.npy", losses)
+np.save("vae_train_losses.npy", train_losses)
+np.save("vae_val_losses.npy", val_losses)
