@@ -9,22 +9,22 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 device = "mps"
 batch_size = 2048
-epochs = 20
+epochs = 10
 
 vae = VAE().to(device)
 optimizer = torch.optim.Adam(vae.parameters(), weight_decay=0, lr=1e-3)
 
 mcplfile = mcpl.MCPLFile("../ODIN.mcpl.gz")
 n_blocks = 100
-data = torch.zeros([n_blocks * 10000, 6], dtype=torch.float32)
+data = torch.zeros([n_blocks * 10000, 4], dtype=torch.float32)
 
 for i, p in enumerate(mcplfile.particle_blocks):
-    data[i * 10000 : (i + 1) * 10000, 0] = torch.asarray(p.weight)
-    data[i * 10000 : (i + 1) * 10000, 1] = torch.asarray(p.ekin)
-    data[i * 10000 : (i + 1) * 10000, 2:4] = torch.asarray(
+    #data[i * 10000 : (i + 1) * 10000, 0] = torch.asarray(p.weight)
+    #data[i * 10000 : (i + 1) * 10000, 1] = torch.asarray(p.ekin)
+    data[i * 10000 : (i + 1) * 10000, 0:2] = torch.asarray(
         np.array([np.atan2(p.uy,p.ux), np.atan2(p.ux,p.uz)])
     ).T
-    data[i * 10000 : (i + 1) * 10000, 4:] = torch.asarray(np.array([p.x, p.y])).T
+    data[i * 10000 : (i + 1) * 10000, 2:] = torch.asarray(np.array([p.x, p.y])).T
     if i == n_blocks - 1:
         break
 
@@ -37,12 +37,11 @@ data = ((data - mins) / scales).clamp(0, 1)
 loader = DataLoader(TensorDataset(data), batch_size=batch_size, shuffle=True)
 
 losses = []
-
 for epoch in range(epochs):
     for (x,) in loader:
         x = x.to(device)
         recon, mu, logvar = vae(x)
-        loss = vae_loss(recon, x, mu, logvar)
+        loss, recon_loss, kl_loss = vae_loss(recon, x, mu, logvar)
 
         optimizer.zero_grad()
         loss.backward()
@@ -50,7 +49,8 @@ for epoch in range(epochs):
 
         losses.append(loss.item())
     if epoch % 1 == 0:
-        print(f'Epoch: {epoch}\tLoss: {loss.item()}\t')
+        print(f'Epoch: {epoch}\tLoss: {loss.item():.4g}')
+        print(f"Reckon loss={recon_loss:.4g}\tKL loss = {kl_loss:.4g}")
 
 torch.save(
     {

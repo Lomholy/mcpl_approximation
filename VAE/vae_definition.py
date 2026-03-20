@@ -3,16 +3,21 @@ from torch.nn import functional as F
 from torch import nn as nn
 
 def vae_loss(recon_x, x, mu, logvar):
-    recon = F.mse_loss(recon_x, x)
-    kl = F.kl_div(recon_x, x) + 1
-    loss = recon + kl
-    print(f'Loss: recon: {recon}\t KL: {kl}')
+    kl_weight = 0.01
+    # Latent (KL divergence) loss
+    latent_loss = 0.5 * torch.mean(torch.exp(logvar) + mu**2 - 1 - logvar)
 
-    return loss
+    # Reconstruction loss (L1)
+    reconstruction_loss = torch.mean(torch.abs(x - recon_x))
+
+    # Total VAE loss
+    vae_loss = reconstruction_loss + kl_weight * latent_loss
+
+    return vae_loss, reconstruction_loss, latent_loss
 
 
 class VAE(nn.Module):
-    def __init__(self, input_dim=6, latent_dim=24, out_act="sigmoid"):
+    def __init__(self, input_dim=4, latent_dim=48, out_act="sigmoid"):
         super().__init__()
         self.input_dim = input_dim
         self.latent_dim = latent_dim
@@ -25,31 +30,39 @@ class VAE(nn.Module):
             nn.Linear(16, 32),
             nn.ReLU(),
             nn.Linear(32, 64),
-            nn.ReLU(),
+            nn.PReLU(),
             nn.Linear(64,128),
-            nn.ReLU(),
+            nn.PReLU(),
+            nn.Linear(128,256),
+            nn.PReLU(),
+            nn.Linear(256,128),
+            nn.PReLU(),
             nn.Linear(128,64),
             nn.ReLU(),
-            nn.Linear(64, 32),
+            nn.Linear(64, 50),
             nn.ReLU(),
-            nn.Linear(32, 32),
+            nn.Linear(50, latent_dim),
             nn.ReLU(),
         )
 
-        self.fc_mu = nn.Linear(32, latent_dim)
-        self.fc_logvar = nn.Linear(32, latent_dim)
+        self.fc_mu = nn.Linear(latent_dim, latent_dim)
+        self.fc_logvar = nn.Linear(latent_dim, latent_dim)
 
         # ---- Decoder ----
 
         self.dec = nn.Sequential(
-            nn.Linear(latent_dim, 32),
+            nn.Linear(latent_dim, 48),
             nn.ReLU(),
-            nn.Linear(32, 32),
+            nn.Linear(48, 50),
             nn.ReLU(),
-            nn.Linear(32, 64),
-            nn.ReLU(),
+            nn.Linear(50, 64),
+            nn.PReLU(),
             nn.Linear(64,128),
-            nn.ReLU(),
+            nn.PReLU(),            
+            nn.Linear(128,256),
+            nn.PReLU(),
+            nn.Linear(256,128),
+            nn.PReLU(),
             nn.Linear(128,64),
             nn.ReLU(),
             nn.Linear(64, 32),
