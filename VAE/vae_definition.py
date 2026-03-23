@@ -2,6 +2,7 @@ import torch
 from torch.nn import functional as F
 from torch import nn as nn
 
+
 def vae_loss(recon_x, x, mu, logvar, kl_weight):
     # Latent (KL divergence) loss
     latent_loss = 0.5 * torch.mean(torch.exp(logvar) + mu**2 - 1 - logvar)
@@ -16,7 +17,7 @@ def vae_loss(recon_x, x, mu, logvar, kl_weight):
 
 
 class VAE(nn.Module):
-    def __init__(self, input_dim=7, latent_dim=48, out_act="sigmoid"):
+    def __init__(self, input_dim=7, latent_dim=256, out_act="sigmoid"):
         super().__init__()
         self.input_dim = input_dim
         self.latent_dim = latent_dim
@@ -30,17 +31,13 @@ class VAE(nn.Module):
             nn.ReLU(),
             nn.Linear(32, 64),
             nn.PReLU(),
-            nn.Linear(64,128),
+            nn.Linear(64, 128),
             nn.PReLU(),
-            nn.Linear(128,256),
+            nn.Linear(128, 256),
             nn.PReLU(),
-            nn.Linear(256,128),
+            nn.Linear(256, 256),
             nn.PReLU(),
-            nn.Linear(128,64),
-            nn.ReLU(),
-            nn.Linear(64, 50),
-            nn.ReLU(),
-            nn.Linear(50, latent_dim),
+            nn.Linear(256, latent_dim),
             nn.ReLU(),
         )
 
@@ -50,19 +47,13 @@ class VAE(nn.Module):
         # ---- Decoder ----
 
         self.dec = nn.Sequential(
-            nn.Linear(latent_dim, 48),
+            nn.Linear(latent_dim, 256),
             nn.ReLU(),
-            nn.Linear(48, 50),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(50, 64),
+            nn.Linear(256, 128),
             nn.PReLU(),
-            nn.Linear(64,128),
-            nn.PReLU(),            
-            nn.Linear(128,256),
-            nn.PReLU(),
-            nn.Linear(256,128),
-            nn.PReLU(),
-            nn.Linear(128,64),
+            nn.Linear(128, 64),
             nn.ReLU(),
             nn.Linear(64, 32),
             nn.ReLU(),
