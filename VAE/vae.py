@@ -175,7 +175,7 @@ parser.add_argument("--epochs", type=int, default=30, help="Number of training e
 parser.add_argument("--kl_weight", type=float, default=0.5, help="KL divergence weight")
 parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
 parser.add_argument("--patience", type=int, default=5, help="Early stopping patience")
-parser.add_argument("--batch_size", type=int, default=2048, help="Batch size")
+parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
 parser.add_argument(
     "--device", type=str, default="cpu", help="Device to use (e.g., cpu, mps or cuda)"
 )
