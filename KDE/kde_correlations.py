@@ -1,47 +1,25 @@
 import numpy as np
+from adaptive_kde import AdaptiveKDE
 import joblib
+import torch
 import matplotlib.pyplot as plt
+import sys
+sys.path.append("..")
+from plotting import plot_correlations_6d
+from data_load import postprocess
 # ==============================================================================
 # ================ Make N synthetic samples, and plot their correlations
 # ==============================================================================
 
 
-def plot_correlations(filename="kde_model.pkl"):
-    labels = [
-        "Weight",
-        "Energy",
-        "Direction x",
-        "Direction y",
-        "Direction z",
-        "Position x",
-        "Position y",
-    ]
-    kde = joblib.load(filename)
-    samples = kde.sample(100000)
-    # labels = ["Angle theta", "Angle phi", "Position x", "Position y"]
+xmin, ymin, dx, dy = np.load("../meta_params_dist.npy")
 
-    input_dim = 7
-    fig, ax = plt.subplots(ncols=input_dim, nrows=input_dim, figsize=(15, 20))
-    for i in range(input_dim):
-        for j in range(input_dim):
-            if j > i:
-                ax[i, j].set_axis_off()
-                continue
-            if j == i:
-                try:
-                    ax[i, j].hist(samples[:, i], bins=50)
-                    ax[i, j].set(xlabel=labels[i], ylabel="Counts")
-                except Exception as e:
-                    print(e)
-                    ax[i, j].set_axis_off()
-                continue
-            ax[i, j].hist2d(samples[:, i], samples[:, j], bins=100)
-            ax[i, j].set(xlabel=labels[i], ylabel=labels[j])
-    fig.tight_layout()
+kde = joblib.load("./adaptive_kde.pkl")
+samples = torch.asarray(kde.sample(100000))
 
+post_data = postprocess(samples, xmin, ymin, dx, dy)
 
-
-plot_correlations()
+plot_correlations_6d(post_data, "Synthetic: Postprocessed data")
 
 plt.show()
 

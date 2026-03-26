@@ -1,61 +1,84 @@
-# Author: Daniel Lomholt Christensen
 import joblib
-import mcpl
-import numpy as np
-from sklearn.neighbors import KernelDensity
-from sklearn.model_selection import train_test_split
+import torch
+from adaptive_kde import AdaptiveKDE
+import sys
+sys.path.append("..")
+from data_load import load_mcpl_file, preprocess
+
+# ---------------------------------------------------------
+# Global multivariate bandwidth matrix
+# (Scott's rule for dimension d)
+# ---------------------------------------------------------
 
 
-def load_mcpl_file(filepath, n_blocks):
-    mcplfile = mcpl.MCPLFile(filepath)
-    data = np.zeros([n_blocks * 10000, 7], dtype=np.float32)
-
-    for i, p in enumerate(mcplfile.particle_blocks):
-        data[i * 10000 : (i + 1) * 10000, 0] = np.asarray(p.weight)
-        data[i * 10000 : (i + 1) * 10000, 1] = np.asarray(p.ekin)
-        data[i * 10000 : (i + 1) * 10000, 2:5] = np.asarray(
-            np.array([p.ux, p.uy, p.uz])
-        ).T
-        data[i * 10000 : (i + 1) * 10000, 5:] = np.asarray(
-            np.array([p.x, p.y])
-        ).T
-
-        if i == n_blocks - 1:
-            break
-
-    return data
+def global_bandwidth_matrix(data):
+    n, d = data.shape
+    cov = torch.cov(data.T)
+    factor = n ** (-1.0 / (d + 4))
+    return cov * factor**2
 
 
-# Load data
-data = load_mcpl_file("../ODIN.mcpl.gz", 10)
-
-# Split into training / validation
-train, val = train_test_split(data, test_size=0.1, shuffle=True, random_state=0)
-
-# Parameter grid
-kernels = ["gaussian", "tophat", "epanechnikov"]
-bandwidths = np.logspace(-4, 0, 10)
-
-best_score = -np.inf
-best_params = None
-best_kde = None
-
-# Grid search
-for kernel in kernels:
-    for bw in bandwidths:
-        kde = KernelDensity(kernel=kernel, bandwidth=bw)
-        kde.fit(train)
-
-        score = kde.score(val)  # average log-likelihood
-
-        if score > best_score:
-            best_score = score
-            best_params = (kernel, bw)
-            best_kde = kde
-            print(f"New best: kernel={kernel}, bw={bw}, score={score}")
+# ---------------------------------------------------------
+# Multivariate Gaussian kernel
+# ---------------------------------------------------------
+def gaussian_kernel(x, data, H_inv, H_det):
+    diff = data - x  # [N, d]
+    # q = diff^T H_inv diff
+    q = torch.einsum("nd,dd,nd->n", diff, H_inv, diff)
+    d = data.shape[1]
+    norm = torch.sqrt((2 * torch.pi) ** d * H_det)
+    return torch.exp(-0.5 * q) / norm
 
 
-# Save best model
-print("Best parameters:", best_params)
-joblib.dump(best_kde, "kde_model.pkl")
-print("Saved model as kde_model.pkl")
+# ---------------------------------------------------------
+# Pilot KDE (global bandwidth)
+# ---------------------------------------------------------
+
+
+def pilot_density(data, H):
+    H_inv = torch.linalg.inv(H)
+    H_det = torch.linalg.det(H)
+
+    vals = []
+    for i in range(data.shape[0]):
+        vals.append(gaussian_kernel(data[i], data, H_inv, H_det).mean())
+    return torch.stack(vals)
+
+
+# ---------------------------------------------------------
+# Compute adaptive bandwidth factors (Abramson)
+# ---------------------------------------------------------
+def adaptive_bandwidths(pilot, epsilon=1e-10):
+    g = torch.exp(torch.mean(torch.log(pilot + epsilon)))
+    return torch.sqrt(g / (pilot + epsilon))
+
+
+# ---------------------------------------------------------
+# Main
+# ---------------------------------------------------------
+if __name__ == "__main__":
+    device = "mps"
+    data = load_mcpl_file("../ODIN.mcpl.gz", 10)
+    data = preprocess(data)[0].to(device)
+
+    print("Computing global bandwidth matrix")
+    # Compute global bandwidth matrix
+    H = global_bandwidth_matrix(data)
+
+    print("Computig pilot density")
+    # Compute pilot density
+    pilot = pilot_density(data, H)
+
+    print("Computing local scaling factors")
+    # Compute local scaling factors
+    local_factors = adaptive_bandwidths(pilot)
+
+    local_factors = local_factors.cpu().detach().numpy()
+    print("Creating the kde object")
+    # Build adaptive KDE object
+    kde = AdaptiveKDE(
+        data.cpu().detach().numpy(), H.cpu().detach().numpy(), local_factors
+    )
+
+    joblib.dump(kde, "adaptive_kde.pkl")
+    print("Saved model as kde_model.pkl")
