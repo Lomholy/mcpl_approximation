@@ -1,54 +1,70 @@
+
+import sys
+sys.path.append("..")
+from data_load import load_mcpl_file, preprocess_nn
 import numpy as np
 import torch
 import os
-import mcpl
 from torch.utils.data import TensorDataset, DataLoader, random_split
 from vae_definition import VAE, vae_loss
 import argparse
+import time
+
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
-def load_mcpl_file(filepath, n_blocks, batch_size):
-    mcplfile = mcpl.MCPLFile(filepath)
-    n_blocks = 100
-    data = torch.zeros([n_blocks * 10000, 7], dtype=torch.float32)
+def add_arguments():
+    # First parse arguments
+    parser = argparse.ArgumentParser()
 
-    for i, p in enumerate(mcplfile.particle_blocks):
-        data[i * 10000 : (i + 1) * 10000, 0] = torch.asarray(p.weight)
-        data[i * 10000 : (i + 1) * 10000, 1] = torch.asarray(p.ekin)
-        data[i * 10000 : (i + 1) * 10000, 2:5] = torch.asarray(
-            np.array([p.ux, p.uy, p.uz])
-        ).T
-        data[i * 10000 : (i + 1) * 10000, 5:] = torch.asarray(np.array([p.x, p.y])).T
-        if i == n_blocks - 1:
-            break
+    parser.add_argument(
+        "--train_type",
+        type=str,
+        help="Training type. Could be either single_training or hyperparameter_scan",
+        default="single_training",
+    )
+    parser.add_argument(
+        "--n_hype_scans",
+        type=int,
+        default=5,
+        help="Number of points in hyperparameter space that is ",
+    )
 
-    eps = 1e-9
-    mins = data.min(0).values
-    maxs = data.max(0).values
-    scales = (maxs - mins).clamp_min(eps)
-    data = ((data - mins) / scales).clamp(0, 1)
-    normalizer_params = {"mins": mins, "maxs": maxs, "scales": scales}
+    parser.add_argument(
+        "--epochs", type=int, default=100, help="Number of training epochs"
+    )
 
-    dataset = TensorDataset(data)
-    n_total = len(dataset)
-    n_val = int(0.1 * n_total)
-    n_train = n_total - n_val
-    train_set, val_set = random_split(dataset, [n_train, n_val])
-
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
-    return train_loader, val_loader, normalizer_params
+    parser.add_argument(
+        "--kl_weight", type=float, default=2, help="KL divergence weight"
+    )
+    parser.add_argument("--lr", type=float, default=5e-3, help="Learning rate")
+    parser.add_argument(
+        "--patience", type=int, default=10, help="Early stopping patience"
+    )
+    parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="mps",
+        help="Device to use (e.g., cpu, mps or cuda)",
+    )
+    parser.add_argument(
+        "--annealing",
+        type=float,
+        default=1,
+        help="How many epochs the kl term is increased over",
+    )
+    return parser
 
 
 def train_vae(
     train_loader,
     val_loader,
     hyperparameters,
-    normalizer_params,
     filename="vae_best.pth",
 ):
+    start = time.time()
     best_val = float("inf")
     no_improve = 0
     train_losses = []
@@ -57,9 +73,12 @@ def train_vae(
     vae = VAE().to(device)
     optimizer = torch.optim.Adam(vae.parameters(), lr=hyperparameters["lr"])
     for epoch in range(hyperparameters["epochs"]):
-        kl_weight = hyperparameters["kl_weight"] * (
-            epoch / hyperparameters["annealing"]
-        )
+        if epoch < hyperparameters["annealing"]:
+            kl_weight = hyperparameters["kl_weight"] * (
+                epoch / hyperparameters["annealing"]
+            )
+        else:
+            kl_weight = hyperparameters["kl_weight"]
         vae.train()
         for (x,) in train_loader:
             x = x.to(device)
@@ -84,18 +103,20 @@ def train_vae(
                 val_losses_batch.append(vloss.item())
         val_mean = np.mean(val_losses_batch)
         val_losses.append(val_mean)
-        print(f"Epoch {epoch}  train={loss.item():.4g}  val={val_mean:.4g}")
+        epoch_time = time.time()
+        print(f"Epoch {epoch}  train={loss.item():.4g}  val={val_mean:.4g}\tBest loss = {best_val:.4g}")
+        print(f"Time elapsed {epoch_time - start}")
 
-        if val_mean < best_val:
+        if (
+            val_mean < best_val
+            or epoch < hyperparameters["annealing"] + hyperparameters["patience"]
+        ):
             best_val = val_mean
             no_improve = 0
             torch.save(
                 {
                     "state_dict": vae.state_dict(),
-                    "mins": normalize_params["mins"],
-                    "maxs": normalize_params["maxs"],
                     "hyperparameters": hyperparameters,
-                    "scales": normalize_params["scales"],
                 },
                 filename,
             )
@@ -108,7 +129,7 @@ def train_vae(
 
 
 def hyperparameter_sweep(
-    n_scans, hyperparameter_space, train_loader, val_loader, normalize_params
+    n_scans, hyperparameter_space, train_loader, val_loader
 ):
     # Hyperparameter plan:
     # Build a list of hyperparameter dicts that I test
@@ -142,7 +163,6 @@ def hyperparameter_sweep(
             train_loader,
             val_loader,
             hyperparameter,
-            normalize_params,
             filename=f"hype_scan_{i}.pth",
         )
         if min_loss > train_losses[-1]:
@@ -154,37 +174,7 @@ def hyperparameter_sweep(
     return min_loss_idx, train_losses_out, val_losses_out
 
 
-# First parse arguments
-parser = argparse.ArgumentParser()
-
-parser.add_argument(
-    "--train_type",
-    type=str,
-    default="single_training",
-    help="Training type. Could be either single_training or hyperparameter_scan",
-)
-parser.add_argument(
-    "--n_hype_scans",
-    type=int,
-    default=5,
-    help="Number of points in hyperparameter space that is ",
-)
-
-parser.add_argument("--epochs", type=int, default=30, help="Number of training epochs")
-
-parser.add_argument("--kl_weight", type=float, default=0.5, help="KL divergence weight")
-parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-parser.add_argument("--patience", type=int, default=5, help="Early stopping patience")
-parser.add_argument("--batch_size", type=int, default=2048, help="Batch size")
-parser.add_argument(
-    "--device", type=str, default="cpu", help="Device to use (e.g., cpu, mps or cuda)"
-)
-parser.add_argument(
-    "--annealing",
-    type=float,
-    default=30,
-    help="How many epochs the kl term is increased over",
-)
+parser = add_arguments()
 
 args = parser.parse_args()
 
@@ -199,13 +189,26 @@ hyperparameters = {
     "annealing": args.annealing,
 }
 
-train_loader, val_loader, normalize_params = load_mcpl_file(
-    "../ODIN.mcpl.gz", 100, batch_size
-)
+data = load_mcpl_file("../ODIN.mcpl.gz", 10)
+
+data, mins, dxs = preprocess_nn(data)
+# Save normalization params
+np.save("normalization_params.npy", np.array([mins, dxs]))
+
+
+dataset = TensorDataset(data)
+n_total = len(dataset)
+n_val = int(0.1 * n_total)
+n_train = n_total - n_val
+train_set, val_set = random_split(dataset, [n_train, n_val])
+
+train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
+
 
 if args.train_type == "single_training":
     train_losses, val_losses = train_vae(
-        train_loader, val_loader, hyperparameters, normalize_params
+        train_loader, val_loader, hyperparameters
     )
 
 if args.train_type == "hyperparameter_scan":
@@ -222,7 +225,6 @@ if args.train_type == "hyperparameter_scan":
         hyperparameter_scan,
         train_loader,
         val_loader,
-        normalize_params,
     )
     print(
         f"Best index was {best_idx}! final training loss was {

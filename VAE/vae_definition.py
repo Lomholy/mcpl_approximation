@@ -17,7 +17,8 @@ def vae_loss(recon_x, x, mu, logvar, kl_weight):
 
 
 class VAE(nn.Module):
-    def __init__(self, input_dim=7, latent_dim=256, out_act="sigmoid"):
+    def __init__(self, input_dim=6, latent_dim=256, out_act="sigmoid"):
+
         super().__init__()
         self.input_dim = input_dim
         self.latent_dim = latent_dim
@@ -35,9 +36,9 @@ class VAE(nn.Module):
             nn.PReLU(),
             nn.Linear(128, 256),
             nn.PReLU(),
-            nn.Linear(256, 256),
-            nn.PReLU(),
             nn.Linear(256, latent_dim),
+            nn.PReLU(),
+            nn.Linear(latent_dim, latent_dim),
             nn.ReLU(),
         )
 
@@ -47,9 +48,9 @@ class VAE(nn.Module):
         # ---- Decoder ----
 
         self.dec = nn.Sequential(
-            nn.Linear(latent_dim, 256),
+            nn.Linear(latent_dim, latent_dim),
             nn.ReLU(),
-            nn.Linear(256, 256),
+            nn.Linear(latent_dim, 256),
             nn.ReLU(),
             nn.Linear(256, 128),
             nn.PReLU(),
