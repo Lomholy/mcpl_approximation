@@ -1,7 +1,5 @@
 import numpy as np
 from numpy.linalg import det, inv
-from scipy.spatial.distance import cdist
-import torch
 
 
 class AdaptiveKDE:
@@ -43,26 +41,3 @@ class AdaptiveKDE:
             samples[i] = base[i] + eps[i] @ L.T
         return samples
 
-
-class AdaptiveKDE_Torch:
-    def __init__(self, data, H, local_factors):
-        self.data = data
-        self.H = H
-        self.local_factors = local_factors
-        self.H_inv = torch.linalg.inv(H)
-        self.H_det = torch.linalg.det(H)
-
-    def sample(self, n):
-        idx = torch.randint(0, self.data.shape[0], (n,), device=self.data.device)
-        base = self.data[idx]
-
-        d = self.data.shape[1]
-        eps = torch.randn(n, d, device=self.data.device)
-
-        samples = torch.zeros_like(base)
-
-        for i in range(n):
-            L = torch.linalg.cholesky(self.H) * self.local_factors[idx[i]]
-            samples[i] = base[i] + eps[i] @ L.T
-
-        return samples.cpu().numpy()
