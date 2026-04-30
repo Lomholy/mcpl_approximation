@@ -6,8 +6,8 @@ import argparse
 import sys
 
 sys.path.append("..")
-from data_load import postprocess_nn
-from plotting import plot_correlations_6d
+from data_load import postprocess_nn, save_data_as_mcpl
+from plotting import plot_correlations_7d
 
 
 # ==============================================================================
@@ -20,11 +20,7 @@ def plot_losses(
 ):
     fig, ax = plt.subplots()
     train_losses = np.load(filename_train)
-    val_losses = np.load(filename_val)
-    val_x = np.linspace(0, train_losses.shape[0], val_losses.shape[0])
     ax.plot(train_losses, label="Train loss")
-    ax.plot(val_x, val_losses, label="Validation losses")
-    ax.legend()
     ax.set(yscale="log")
     ax.set(
         title="Loss per iteration",
@@ -42,22 +38,47 @@ def plot_losses(
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--correlations_file", type=str, default="vae_best.pth")
+parser.add_argument("--plot", action="store_true")
+parser.add_argument("--loss", action="store_true")
 args = parser.parse_args()
+filename = args.correlations_file
+
+
 device = "mps"
 
-ckpt = torch.load("vae_best.pth", map_location=device)
+ckpt = torch.load(filename, map_location=device)
 
 vae = VAE().to(device)
 vae.load_state_dict(ckpt["state_dict"])
 vae.eval()
-
+lims = np.load("../limits.npy")
+mins = torch.asarray(lims[0])
+maxs = torch.asarray(lims[1])
+        
 with torch.no_grad():
-    z = torch.randn(100000, vae.latent_dim).to(device)  # sample 1000 latent vectors
-    samples = vae.decode(z)  # synthetic data in [0,1]
-samples = samples.cpu()
+    # Only include samples if they are within the limits of the original data
 
-# samples = postprocess_nn(samples, 0, 0, filename="normalization_params.npy")
+    n_samples = 1_000_00
+    samples = []
+    while len(samples) < n_samples:
+        print(len(samples))
+        # Limit samples to within the preprocessed data limits
+        z = torch.randn(10_000, vae.latent_dim).to(device)
+        batch = torch.asarray(vae.decode(z).cpu())
+        batch = postprocess_nn(batch, filename="normalization_params.npy")
+        mask = (batch >= mins) & (batch <= maxs)
+        batch = batch[mask.all(axis=1)]
+        samples = samples + batch.tolist()
+    samples = samples[:n_samples]
+    samples = torch.asarray(samples)
 
-plot_correlations_6d(samples, "Synthetic VAE: correaltions post")
+
+if args.loss:
+    plot_losses()
+if args.plot:
+    plot_correlations_7d(samples, "Synthetic VAE: correlations postprocessed")
+
+# save_data_as_mcpl(samples, "../vae_samples")
+
 
 plt.show()

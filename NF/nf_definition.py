@@ -8,33 +8,36 @@ import math
 # ---------------------------------------------------------
 
 
-class Block(nn.Module):
-    def __init__(self, channels=512):
-        super().__init__()
-        self.ff = nn.Linear(channels, channels)
-        self.act = nn.ReLU()
-
-    def forward(self, x):
-        return self.act(self.ff(x))
-
 class VelocityField(nn.Module):
-    def __init__(self,
-                 input_dim=5,
-                 layers=5,
-                 time_dimensions=512,
-                 network_dimensions=512
-                 ):
+    def __init__(self, input_dim=6, start = 12, mid = 512, network_dimensions=512):
         super().__init__()
-        self.t_dim = time_dimensions
-        self.t_in = nn.Linear(time_dimensions, network_dimensions)
-        self.x_in = nn.Linear(input_dim, network_dimensions)
-        self.blocks = nn.Sequential(*[
-            Block(network_dimensions) for _ in range(layers)
-            ])
-        self.net = nn.Sequential(nn.Linear(network_dimensions, input_dim))
+        self.t_dim = input_dim
+        self.apply_model = nn.Sequential(
+                nn.Linear(start, start * 2),
+                nn.LeakyReLU(),
+                nn.Linear(start * 2, start * 2**2),
+                nn.LeakyReLU(),
+                nn.Linear(start * 2**2, start * 2**3),
+                nn.LeakyReLU(),
+                nn.Linear(start * 2**3, start * 2**4),
+                nn.LeakyReLU(),
+                nn.Linear(start * 2**4, 512),
+                nn.LeakyReLU(),
+                nn.Linear(512, 512),
+                nn.LeakyReLU(),
+                nn.Linear(512, start * 2**4),
+                nn.LeakyReLU(),
+                nn.Linear(start * 2**4, start * 2**3),
+                nn.LeakyReLU(),
+                nn.Linear(start * 2**3, start * 2**2),
+                nn.LeakyReLU(),
+                nn.Linear(start * 2**2, start * 2),
+                nn.LeakyReLU(),
+                nn.Linear(start * 2, input_dim)
+        )
 
     def time_embed(self, t, max_positions=10000):
-        # Embed t into a trigonometric space. Half of inputs are cosine, other half are sine 
+        # Embed t into a trigonometric space. Half of inputs are cosine, other half are sine
         t = t.squeeze(-1) * max_positions
         half_dim = self.t_dim // 2
         emb = math.log(max_positions) / (half_dim - 1)
@@ -42,18 +45,12 @@ class VelocityField(nn.Module):
         emb = t[:, None] * emb[None, :]
         emb = torch.cat([emb.sin(), emb.cos()], dim=1)
         if self.t_dim % 2 == 1:  # zero padding
-            emb = nn.functional.pad(emb, (0, 1), mode='constant')
+            emb = nn.functional.pad(emb, (0, 1), mode="constant")
         return emb
 
     def forward(self, x, t):
         # Embed time t (shape: [batch_size, 1]) into a higher-dimensional vector
         t_embed = self.time_embed(t)
-        t_embed = self.t_in(t_embed)
-
-        x = self.x_in(x)
-        x = x + t_embed
-        x = self.blocks(x)
-        x = self.net(x)
-
-        # Pass through the network to predict the velocity at (x, t)
+        x = torch.column_stack((x, t_embed))
+        x = self.apply_model(x)
         return x

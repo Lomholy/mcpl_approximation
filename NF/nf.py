@@ -16,7 +16,7 @@ import numpy as np
 
 
 def add_arguments(parser):
-    parser.add_argument("--n_particles", default=1e5)
+    parser.add_argument("--n_particles", default=1e6)
     parser.add_argument("--model_filename", default="flowModel.pth")
     parser.add_argument("--device", default="mps")
 
@@ -26,7 +26,7 @@ def add_arguments(parser):
 # ---------------------------------------------------------
 
 
-def weighted_flow_matching_loss(model, x0, x1, t, w):
+def flow_matching_loss(model, x0, x1, t):
     """
     x1: (B,5) data samples
     w: (B,) importance weights, >=0
@@ -41,7 +41,7 @@ def weighted_flow_matching_loss(model, x0, x1, t, w):
     # Model velocity
     v_pred = model(xt, t)
     # Weighted MSE
-    loss = ( w * ((v_pred - v_target) ** 2).mean(dim=-1)).mean()
+    loss = ( ((v_pred - v_target) ** 2).mean(dim=-1)).mean()
 
     return loss
 
@@ -52,12 +52,11 @@ def weighted_flow_matching_loss(model, x0, x1, t, w):
 def train(
         model,
         dataset,
-        weights,
         filename,
         device="mps",
         steps=100000,
         lr=1e-3,
-        batch_size=10000
+        batch_size=256
         ):
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     best_loss = float('inf')
@@ -71,8 +70,7 @@ def train(
         x0 = torch.randn(batch_size, dataset.shape[1]).to(device)
         x1 = dataset[idx].to(device)
         t = torch.rand(batch_size, 1).to(device)
-        w = weights[idx].to(device)
-        loss = weighted_flow_matching_loss(model, x0, x1, t, w)
+        loss = flow_matching_loss(model, x0, x1, t)
 
         # Make the loss, an average of more than 1 step
         opt.zero_grad()
@@ -101,17 +99,14 @@ parser = argparse.ArgumentParser()
 add_arguments(parser)
 args = parser.parse_args()
 data = load_mcpl_file("../ODIN.mcpl.gz", int(args.n_particles))
-data, weights, mins, dxs = preprocess_nn(data)
-total_int = weights.sum()
-weights = weights / total_int
+data, mins, dxs = preprocess_nn(data)
+np.save("normalization_params.npy", np.array([mins, dxs]))
 dim = data.shape[1]
 device = args.device
 
-print("Weights:", weights.min(), weights.max(), weights.mean(), weights.std())
+model = VelocityField().to(device)
 
-model = VelocityField(network_dimensions=512, layers=5).to(device)
-
-losses = train(model, data, weights, args.model_filename)
+losses = train(model, data, args.model_filename)
 
 np.save("losses.npy", np.array(losses))
 

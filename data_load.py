@@ -2,24 +2,31 @@
 import mcpl
 import numpy as np
 import torch
+import np2mcpl
 
 
-def load_mcpl_file(filepath, n_blocks):
+def load_mcpl_file(
+    filepath: str, n_particles: int, offset: int = 0, print_status: bool = False
+):
     mcplfile = mcpl.MCPLFile(filepath)
-    data = np.zeros([n_blocks * 10000, 7], dtype=np.float32)
+    data = np.zeros([n_particles, 7], dtype=np.float32)
 
-    for i, p in enumerate(mcplfile.particle_blocks):
-        data[i * 10000 : (i + 1) * 10000, 0] = np.asarray(p.weight)
-        data[i * 10000 : (i + 1) * 10000, 1] = np.asarray(p.ekin)
-        data[i * 10000 : (i + 1) * 10000, 2:5] = np.asarray([p.ux, p.uy, p.uz]).T
-        data[i * 10000 : (i + 1) * 10000, 5:] = np.asarray([p.x, p.y]).T
-        if i == n_blocks - 1:
+    for i, p in enumerate(mcplfile.particles):
+        if i < offset:
+            continue
+        if i % 10000 == 0 and print_status == True:
+            print(f"Loading particles. {i - offset} currently loaded.")
+        j = i - offset
+        data[j : (j + 1), 0] = np.asarray(p.weight)
+        data[j : (j + 1), 1] = np.asarray(p.ekin)
+        data[j : (j + 1), 2:5] = np.asarray([p.ux, p.uy, p.uz]).T
+        data[j : (j + 1), 5:] = np.asarray([p.x, p.y]).T
+        if j >= n_particles + offset:
             break
     return torch.tensor(data, dtype=torch.float32)
 
 
 def dim_reduction(data):
-    #
     out = torch.zeros((data.shape[0], 6))
     out[:, 0:2] = data[:, 0:2]
     ux, uy, uz = data[:, 2], data[:, 3], data[:, 4]
@@ -27,12 +34,13 @@ def dim_reduction(data):
     phi = torch.atan2(uy, ux)
     out[:, 2] = theta
     out[:, 3] = phi
-    out[:, 4:] = data[:, 5:]
+    out[:, 4:] = data[:, 5:7]
     return out
 
 
 def preprocess(data):
     data = dim_reduction(data)
+
     eps = 1e-12
     data[:, 0] = torch.log(data[:, 0] + eps)  # weight
     data[:, 1] = torch.log(data[:, 1] + eps)  # energy
@@ -79,15 +87,17 @@ def preprocess_nn(data):
     data = dim_reduction(data)
     mins = np.zeros((data.shape[1]))
     dxs = np.zeros((data.shape[1]))
+    data[:, 0] = torch.log(data[:, 0]*1e20 + 1)  # weight
+    data[:, 1] = torch.log(data[:, 1]*1e10 + 1)  # energy
     for i in range(data.shape[1]):
         data[:, i], mins[i], dxs[i] = normalize(data[:, i])
-
     return data, mins, dxs
 
 
 def postprocess(data, xmin, ymin, dx, dy):
-    data[:, 0] = torch.exp(data[:, 0])
-    data[:, 1] = torch.exp(data[:, 1])
+    output = torch.zeros((data.shape[0], 7))
+    output[:, 0] = torch.exp(data[:, 0])
+    output[:, 1] = torch.exp(data[:, 1])
     theta = torch.special.expit(data[:, 2])
     theta *= torch.pi
     phi = torch.special.expit(data[:, 3])
@@ -95,6 +105,9 @@ def postprocess(data, xmin, ymin, dx, dy):
     phi -= torch.pi
     data[:, 2] = theta
     data[:, 3] = phi
+    output[:, 2] = np.cos(data[:, 3]) * np.sin(data[:, 2])
+    output[:, 3] = np.sin(data[:, 3]) * np.sin(data[:, 2])
+    output[:, 4] = np.cos(data[:, 2])
 
     x = torch.special.expit(data[:, 4])
     y = torch.special.expit(data[:, 5])
@@ -103,10 +116,9 @@ def postprocess(data, xmin, ymin, dx, dy):
     x += xmin
     y += ymin
 
-    data[:, 4] = x
-    data[:, 5] = y
-
-    return data
+    output[:, 5] = x
+    output[:, 6] = y
+    return output
 
 
 def inverse_norm(data, min, dx):
@@ -114,9 +126,37 @@ def inverse_norm(data, min, dx):
     return data
 
 
-def postprocess_nn(data, mins, dxs, filename=""):
+def postprocess_nn(data, mins=None, dxs=None, filename=""):
     if filename != "":
         mins, dxs = np.load(filename)
     for i in range(data.shape[1]):
         data[:, i] = inverse_norm(data[:, i], mins[i], dxs[i])
-    return data
+    output = torch.zeros((data.shape[0], 7))
+    output[:, 0] = (np.exp(data[:, 0]) - 1)/1e20
+    output[:, 1] = (np.exp(data[:, 1]) - 1)/1e10
+
+    output[:, 2] = np.cos(data[:, 3]) * np.sin(data[:, 2])
+    output[:, 3] = np.sin(data[:, 3]) * np.sin(data[:, 2])
+    output[:, 4] = np.cos(data[:, 2])
+    output[:, 5:] = data[:, 4:]
+
+    return output
+
+
+def save_data_as_mcpl(data, filename):
+    # Convert the input data which is 6d, to np2mcpl data, which is 10 d
+    output = np.zeros((data.shape[0], 10))
+    output[:, 0] = 2112  # PDG code
+    output[:, 1] = data[:, 5]  # Position in xy
+    output[:, 2] = data[:, 6]  # Position in xy
+    output[:, 3] = 6000  # Position in Z
+    # Convert angles into direction vector
+    output[:, 4] = data[:, 2]
+    output[:, 5] = data[:, 3]
+    output[:, 6] = data[:, 4]
+
+    output[:, 7] = 1 # Time is irrelevant here
+    output[:, 8] = data[:, 1] # Energy
+    output[:, 9] = data[:, 0] # Weight
+
+    np2mcpl.save(filename, output)
