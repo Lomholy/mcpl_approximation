@@ -19,17 +19,18 @@ def split_mcpl_file(mcpl_file, requested_sizes, filename, input_particles, origi
         new_data = copy.copy(data)
         diff = total_I - data[idx,0].sum()
 
-        new_data[idx, 0] *= diff/len(idx)
+        new_data[idx, 0] += diff/len(idx)
         print(f"size={size}\ntotal I of new data = {new_data[idx,0].sum()}")
         save_data_as_mcpl(new_data[idx], filename=filename + f"_{size}")
 
 
 
 if __name__ == "__main__":
-    original_data = load_mcpl_file("../ODIN.mcpl.gz", n_particles=254_134_779).numpy()
-    requested_sizes = np.logspace(1, 6, 6)
+    original_data = load_mcpl_file("../ODIN_n11.mcpl.gz", n_particles=254_134_779).numpy()
+    requested_sizes = np.logspace(1, 6, 10)
     split_mcpl_file("../ODIN.mcpl.gz", requested_sizes, "./mcpl_files/input", 1_000_000, original_data)
     print("\n")
+    requested_sizes = np.logspace(1, 7, 10)
     split_mcpl_file("../cmf_samples.mcpl.gz", requested_sizes, "./mcpl_files/cfm", 10_000_000, original_data)
 
 
