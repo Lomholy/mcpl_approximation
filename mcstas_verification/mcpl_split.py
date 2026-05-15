@@ -21,14 +21,13 @@ def split_mcpl_file(mcpl_file, requested_sizes, filename, input_particles, origi
     for size in requested_sizes:
         if size>data.shape[0]:
             continue
-        np.random.shuffle(data)
         size = int(size)
-        idx = np.arange(0,size)
+        idx = np.random.choice(data.shape[0], size, replace=False)
         new_data = copy.copy(data[idx])
         scale = total_N/size
-        new_data[idx, 0] *= scale
-        print(f"size={size}\ntotal I of new data = {new_data[idx,0].sum()}")
-        save_data_as_mcpl(new_data[idx], filename=filename + f"_{size}")
+        new_data[:, 0] *= scale
+        print(f"size={size}\ntotal I of new data = {new_data[:,0].sum()}")
+        save_data_as_mcpl(new_data, filename=filename + f"_{size}")
     return
 
 
