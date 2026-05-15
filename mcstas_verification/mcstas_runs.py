@@ -11,8 +11,13 @@ mcstas_file = ms.McStas_file("./odin_sample.instr")
 
 mcstas_file.add_to_instr(instr)
 
-instr.set_parameters(run_from_mcpl=f'"../ODIN.mcpl.gz"')
-instr.settings(output_path="simulations/raw") 
+
+instr.set_parameters(run_from_mcpl=f'"../ODIN_n_11_2.mcpl.gz"')
+instr.settings(output_path="simulations/raw_2") 
+
+instr.backengine()
+instr.set_parameters(run_from_mcpl=f'"../ODIN_n11.mcpl.gz"')
+instr.settings(output_path="simulations/raw_1") 
 instr.backengine()
 
 for file in os.listdir("mcpl_files"):
@@ -24,5 +29,3 @@ for file in os.listdir("mcpl_files"):
     instr.settings(output_path="simulations/" + name) 
     instr.backengine()
     instr.settings(force_compile=False)
-
-
