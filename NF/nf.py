@@ -136,7 +136,7 @@ data = load_mcpl_file("../ODIN.mcpl.gz", int(args.n_particles))
 plot_correlations_7d(data, title="Raw input data", filename="raw_input.png")
 transformer = RankGaussianizer()
 data = torch.asarray(transformer.fit_transform(data), dtype=torch.float32)
-torch.save(torch.asarray(data), "../gaussian_input")
+torch.save(torch.asarray(data), "../gaussian_input.pkl")
 
 
 with open('gaussian_transformer.pkl', 'wb') as outp:

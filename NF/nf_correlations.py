@@ -9,6 +9,7 @@ import argparse
 import numpy as np
 from tqdm import tqdm
 import pickle
+import time
 
 def sample_flow(model, n_samples, device="mps", t_steps=256):
     """
@@ -50,6 +51,7 @@ with open('gaussian_transformer.pkl', 'rb') as inp:
 
 samples = []
 gaussian_samples = []
+start = time.time()
 while len(samples) < n_samples:
     print(len(samples))
     # Limit samples to within the preprocessed data limits
@@ -59,6 +61,7 @@ while len(samples) < n_samples:
     mask = (batch >= mins) & (batch <= maxs)
     batch = batch[mask.all(axis=1)]
     samples = samples + batch.tolist()
+    print(f"Time passed = {time.time() - start}")
 samples = samples[:n_samples]
 gaussian_samples = gaussian_samples[:n_samples]
 samples = torch.asarray(samples)
@@ -70,5 +73,5 @@ if args.plot:
     plot_correlations_7d(samples, "Synthetic CFM: correlations", filename="raw_output.png")
 
 save_data_as_mcpl(samples, "../cmf_samples")
-torch.save(gaussian_samples, "../gaussian_output")
+torch.save(gaussian_samples, "../gaussian_output.pkl")
 plt.show()
