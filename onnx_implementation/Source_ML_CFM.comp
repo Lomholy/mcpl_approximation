@@ -1,0 +1,385 @@
+/*******************************************************************************
+*
+* McStas, neutron ray-tracing package
+*         Copyright 1997-2026, All rights reserved
+*         Risoe National Laboratory, Roskilde, Denmark
+*         Institut Laue Langevin, Grenoble, France
+*
+* Component: Source_ML_CFM
+*
+* %I
+* Written by: Daniel Lomholt Christensen 
+* Date: June 1st, 2026
+* Origin: NBI@UCPH funded by ACTNXT
+*
+* A source that samples from a machine learning model (Type Conditional Flow Matching)
+*
+* %D
+* This component 
+*
+*
+* Example: Source_simple(radius=0.1, dist=2, focus_xw=.1, focus_yh=.1, E0=14, dE=2)
+*
+* %P
+* gauss: [1]                          Gaussian (1) or Flat (0) energy/wavelength distribution
+*
+* %E
+*******************************************************************************/
+
+DEFINE COMPONENT Source_ML_CFM
+
+SETTING PARAMETERS (string ML_filename="",
+                    string transformer_filename = "",
+                    int batch_size = 1000,
+                    int t_steps = 256,
+                    verbose=1
+                   )
+
+
+DEPENDENCY "@MCPLFLAGS@"
+
+
+SHARE
+%{
+  
+
+  #include <stdio.h>
+  #include "onnxruntime/core/session/onnxruntime_c_api.h"
+  // In order to make mcstas find the onnxruntime I 
+  // had to add the following compiler flags:
+  // export CPATH="$CONDA_PREFIX/include"
+  // export LDFLAGS="-L$CONDA_PREFIX/lib -lonnxruntime -Wl,-rpath,$CONDA_PREFIX/lib"
+
+  #include <stdlib.h>
+  #include <math.h>
+  #include <sys/stat.h>
+  #include <stdio.h>
+  
+
+
+  #define CHECK(status)                                  \
+    if (status != NULL) {                              \
+        fprintf(stderr, "Error: %s\n",                 \
+                api->GetErrorMessage(status));         \
+        api->ReleaseStatus(status);                   \
+        exit(1);                                      \
+    }
+
+  // Functions for Gauss rank scaling
+  #define SQRT2 1.4142135623730951
+
+// --------------------------------------------------
+// Load binary transform
+// --------------------------------------------------
+void load_transform_binary(char* path,
+                           int* n, int* d,
+                           double** grid,
+                           double** sorted_cols)
+{
+    FILE* f = fopen(path, "rb");
+    if (!f) {
+        perror("fopen");
+        exit(1);
+    }
+
+    fread(n, sizeof(int), 1, f);
+    fread(d, sizeof(int), 1, f);
+
+    *grid = malloc((*n) * sizeof(double));
+    *sorted_cols = malloc((*n) * (*d) * sizeof(double));
+
+    fread(*grid, sizeof(double), *n, f);
+    fread(*sorted_cols, sizeof(double), (*n) * (*d), f);
+
+    fclose(f);
+}
+
+// --------------------------------------------------
+// Normal CDF (matches your Python version)
+// --------------------------------------------------
+double normal_cdf(double z)
+{
+    return 0.5 * (1.0 + erf(z / SQRT2));
+}
+
+// --------------------------------------------------
+// Linear interpolation (np.interp equivalent)
+// --------------------------------------------------
+double interp(double x, const double* xs, const double* ys, int n)
+{
+    int lo = 0;
+    int hi = n - 1;
+
+    // binary search
+    while (hi - lo > 1) {
+        int mid = (lo + hi) / 2;
+        if (xs[mid] > x)
+            hi = mid;
+        else
+            lo = mid;
+    }
+
+    double t = (x - xs[lo]) / (xs[hi] - xs[lo]);
+    return ys[lo] + t * (ys[hi] - ys[lo]);
+}
+
+// --------------------------------------------------
+// Clamp helper
+// --------------------------------------------------
+double clamp(double x, double lo, double hi)
+{
+    if (x < lo) return lo;
+    if (x > hi) return hi;
+    return x;
+}
+
+// --------------------------------------------------
+// Inverse transform
+// data:    input (n × d) [row-major]
+// output:  output (n × d) [row-major]
+// --------------------------------------------------
+void inverse_transform(const float* data,
+                       float* output,
+                       int n, int d,
+                       char* file_path)
+{
+    int n_file, d_file;
+    double* grid;
+    double* sorted_cols;
+
+    load_transform_binary(file_path, &n_file, &d_file,
+                          &grid, &sorted_cols);
+
+    double lo = grid[0];
+    double hi = grid[n_file - 1];
+
+    for (int j = 0; j < d; j++) {
+        const double* col = &sorted_cols[j * n_file];
+
+        for (int i = 0; i < n; i++) {
+            double z = data[i * d + j];
+
+            // u = normal_cdf(z)
+            double u = normal_cdf(z);
+
+            // clamp
+            u = clamp(u, lo, hi);
+
+            // interpolate
+            output[i * d + j] = (float)interp(u, grid, col, n_file);
+        }
+    }
+
+    free(grid);
+    free(sorted_cols);
+}
+
+
+
+  %}
+/* Neutron parameters: (x,y,z,vx,vy,vz,t,sx,sy,sz,p) */
+DECLARE
+%{
+  int local_id;
+  int idx;
+  int base;
+  const OrtApi* api;
+  int dim;
+  double dt;
+  double tot_vel;
+  OrtValue* xt_tensor;
+  OrtValue* t_tensor;
+  OrtValue* output_tensor;
+  float* xt;
+  float* t_vals;
+  float* output;
+  double weight_norm;
+  double n_training_samples;
+
+  OrtSessionOptions* session_options;
+
+  OrtEnv* env;
+  OrtSession* session;
+
+  OrtMemoryInfo* memory_info;
+  OrtValue* input_tensors[2];
+
+  const char* input_names[2];
+  const char* output_names[1];
+
+  float* output_data;
+%}
+INITIALIZE
+%{
+    local_id = 0;
+    api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+
+
+    // Create environment
+    CHECK(api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "test", &env));
+
+    // Create session options
+    CHECK(api->CreateSessionOptions(&session_options));
+    // CHECK(api->SetSessionLogSeverityLevel(session_options, 0));
+    // Optional: set number of threads. 0 means auto
+    CHECK(api->SetIntraOpNumThreads(session_options, 0));
+    CHECK(api->SetInterOpNumThreads(session_options, 0));
+
+    // Set graph optimizations on
+    CHECK(api->SetSessionGraphOptimizationLevel(
+      session_options, ORT_ENABLE_ALL));
+
+    // ========================================================================
+    // =========================== LOAD MODEL =================================
+    // ========================================================================
+    CHECK(api->CreateSession(env, ML_filename, session_options, &session));
+    if (verbose) printf("Model loaded successfully!\n");
+
+
+    // Get number of training samples from metadata
+    OrtModelMetadata* metadata;
+    CHECK(api->SessionGetModelMetadata(session, &metadata));
+    OrtAllocator *allocator;
+    CHECK(api->GetAllocatorWithDefaultOptions(&allocator));
+    char* value = NULL;
+    CHECK(api->ModelMetadataLookupCustomMetadataMap(
+        metadata,
+        allocator,
+        "n_training_samples",
+        &value
+    ));
+    
+    if (value) {
+        n_training_samples = (double)atoi(value);
+        printf("Number of neutron trained on: %s\n", value);
+        allocator->Free(allocator, value);
+    }
+    if (verbose) printf("Loaded metadata successfully!\n");
+    
+
+    // ========================================================================
+    // =========================== PREPARE SAMPLING ===========================
+    // ========================================================================
+
+    dim = 7;
+    dt = 1.0f / t_steps;
+
+    // Create memory info (CPU)
+    CHECK(api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memory_info));
+
+    // Input/output names (adjust if needed!)
+    input_names[0] = "input";
+    input_names[1] = "t";
+    output_names[0] = "output";
+
+    // Shapes
+    int64_t xt_shape[] = {batch_size, dim};
+    int64_t t_shape[]  = {batch_size, 1};
+
+    xt = (float*) malloc(batch_size * dim * sizeof(float));
+    t_vals = (float*) malloc(batch_size * sizeof(float));
+    output   = (float*) malloc(batch_size * dim * sizeof(float));
+
+    // Create Ort tensors
+
+    CHECK(api->CreateTensorWithDataAsOrtValue(
+        memory_info, xt, batch_size * dim * sizeof(float),
+        xt_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &xt_tensor));
+
+    CHECK(api->CreateTensorWithDataAsOrtValue(
+        memory_info, t_vals, batch_size * sizeof(float),
+        t_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &t_tensor));
+
+    CHECK(api->CreateTensorWithDataAsOrtValue(
+    memory_info, output, batch_size * dim * sizeof(float),
+    xt_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &output_tensor));
+
+    input_tensors[0] = xt_tensor;
+    input_tensors[1] = t_tensor;
+    if (verbose) printf("Arrays allocated successfully. INITIALIZE finished!\n");
+    weight_norm = mcget_ncount()/n_training_samples;
+    printf("Weight norm = %g\n", weight_norm);
+%}
+TRACE
+%{
+  if (local_id%batch_size == 0){
+    // ========================================================================
+    // ======================== SAMPLING A BATCH OF NEUTRONS ==================
+    // ========================================================================
+
+
+    for (int i = 0; i < batch_size * dim; i++) {
+        float u1 = ((float) rand()) / (float)RAND_MAX;
+        float u2 = ((float) rand()) / (float)RAND_MAX;
+        xt[i] = sqrtf(-2.0f * logf(u1)) * cosf(2.0f * M_PI * u2);
+    }
+
+    for (int step = 0; step < t_steps; step++) {
+
+        float t_scalar = (float) step / (float) t_steps;
+
+        // fill t
+        #pragma omp simd
+        for (int i = 0; i < batch_size; i++) {
+            t_vals[i] = t_scalar;
+        }
+
+        CHECK(api->Run(
+            session, NULL,
+            input_names,
+            (const OrtValue* const*)input_tensors, 2,
+            output_names, 1,
+            &output_tensor
+        ));
+
+        CHECK(api->GetTensorMutableData(output_tensor, (void**)&output_data));
+
+        #pragma omp simd
+        for (int i = 0; i < batch_size * dim; i++) {
+            xt[i] += dt * output_data[i];
+        }
+    }
+    inverse_transform(xt, output_data, batch_size, dim, transformer_filename);
+  }
+  
+  idx = local_id % batch_size;
+  base = idx * dim;
+
+
+  p       = output_data[base + 0]*weight_norm;
+  tot_vel = SE2V * sqrt(output_data[base + 1]*1e9);
+  x       = output_data[base + 5]/100;
+  y       = output_data[base + 6]/100;
+  z       = 0;
+  vx      = output_data[base + 2] * tot_vel;
+  vy      = output_data[base + 3] * tot_vel;
+  vz      = output_data[base + 4] * tot_vel;
+  t       = 0;
+
+  local_id++;
+
+%}
+
+
+FINALLY 
+%{
+    // Cleanup tensors
+    api->ReleaseValue(xt_tensor);
+    api->ReleaseValue(t_tensor);
+    api->ReleaseValue(output_tensor);
+
+    // Cleanup
+    free(xt);
+    free(t_vals);
+    free(output);
+    api->ReleaseMemoryInfo(memory_info);
+    api->ReleaseSession(session);
+    api->ReleaseSessionOptions(session_options);
+    api->ReleaseEnv(env);
+%}
+
+MCDISPLAY
+%{
+%}
+
+END
