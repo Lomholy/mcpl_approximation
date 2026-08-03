@@ -1,109 +1,55 @@
 import torch
 from torch.nn import functional as F
 from torch import nn as nn
-import numpy as np
 
+class ResBlock(nn.Module):
+    def __init__(self, width):
+        super().__init__()
+        self.norm = nn.LayerNorm(width)
+        self.fc1 = nn.Linear(width, 4 * width)
+        self.fc2 = nn.Linear(4 * width, width)
 
-def sigmoid(x, top, center, slope=0.03):
-    return (top)/(1+np.exp((center - x)*slope))
-
-
-def vae_loss(recon_x, x, mu, sig, kl_weight, current_epoch, total_epochs):
-    # Latent (KL divergence) loss
-    var = sig**2
-    if current_epoch > 1/3 * total_epochs:
-        latent_loss = 0.5 * torch.sum(-1 - torch.log(var) + var + mu**2)
-        latent_loss *= sigmoid(current_epoch, top=kl_weight, center=1/2*total_epochs)
-    else:
-        latent_loss = torch.tensor(0)
-    # Reconstruction loss (L1)
-    reconstruction_loss = F.mse_loss(recon_x, x, reduction="sum")
-    if reconstruction_loss.isnan() or latent_loss.isnan():
-        print(f"Nan present in loss!, rec loss {reconstruction_loss.isnan()}, lat loss{latent_loss.isnan()}")
-        exit(0)
-    # Total VAE loss
-    vae_loss = reconstruction_loss + latent_loss
-    return vae_loss, reconstruction_loss, latent_loss
+    def forward(self, x):
+        y = self.norm(x)
+        y = self.fc2(F.silu(self.fc1(y)))
+        return x + y
 
 
 class VAE(nn.Module):
-    def __init__(self, input_dim=6, latent_dim=256):
-
+    def __init__(self, input_dim=7, latent_dim=32, width=64, depth=4):
         super().__init__()
-        self.input_dim = input_dim
-        self.latent_dim = latent_dim
+        self.lat_dim = latent_dim
 
-        # ---- Encoder ----
+        # Encoder
+        self.in_proj = nn.Linear(input_dim, width)
+        self.enc_blocks = nn.ModuleList([ResBlock(width) for _ in range(depth)])
 
+        self.fc_mu  = nn.Linear(width, latent_dim)
+        self.fc_sig = nn.Linear(width, latent_dim)
 
-        self.enc = nn.Sequential(
-            nn.Linear(input_dim, 16),
-            nn.BatchNorm1d(16),
-            nn.LeakyReLU(),
-            nn.Linear(16, 32),
-            nn.BatchNorm1d(32),
-            nn.LeakyReLU(),
-            nn.Linear(32, 64),
-            nn.BatchNorm1d(64),
-            nn.LeakyReLU(),
-            nn.Linear(64, 128),
-            nn.BatchNorm1d(128),
-            nn.LeakyReLU(),
-            nn.Linear(128, latent_dim)
-        )
-
-        self.fc_mu = nn.Linear(latent_dim, latent_dim)
-        self.fc_sig = nn.Linear(latent_dim, latent_dim)
-
-        # ---- Decoder ----
-
-        self.dec = nn.Sequential(
-            nn.Linear(latent_dim, 128),
-            nn.BatchNorm1d(128),
-            nn.LeakyReLU(),
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
-            nn.LeakyReLU(),
-            nn.Linear(64, 32),
-            nn.BatchNorm1d(32),
-            nn.LeakyReLU(),
-            nn.Linear(32, 16),
-            nn.BatchNorm1d(16),
-            nn.LeakyReLU(),
-            nn.Linear(16, input_dim)
-        )
-        
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(m.weight, a=0.01)
-                nn.init.zeros_(m.bias)
-
-
+        # Decoder
+        self.dec_in = nn.Linear(latent_dim, width)
+        self.dec_blocks = nn.ModuleList([ResBlock(width) for _ in range(depth)])
+        self.dec_out = nn.Linear(width, input_dim)
 
     def encode(self, x):
-        h = self.enc(x)
-        mu = self.fc_mu(h)
-        sig = F.softplus(self.fc_sig(h)) + 1e-6
-        
-        if mu.isnan().any() or sig.isnan().any():
-            print(f"NaN in encoder output {x}")
-            print(f"mu={mu}")
-            print(f"sig={sig}")
+        x = self.in_proj(x)
+        for block in self.enc_blocks:
+            x = block(x)
+        logvar = self.fc_sig(x)
+        logvar = torch.clamp(logvar, -20, 10)
 
-            exit()
-        return mu, sig
-
-    def reparameterize(self, mu, sig):
-        std = sig
-        eps = torch.randn_like(std)
-        return mu + eps * std  # z
+        return self.fc_mu(x), logvar
 
     def decode(self, z):
-        h = self.dec(z)
-        return h
+        z = self.dec_in(z)
+        for block in self.dec_blocks:
+            z = block(z)
+        return self.dec_out(z)
 
     def forward(self, x):
         mu, sig = self.encode(x)
-        z = self.reparameterize(mu, sig)
-        recon = self.decode(z)
-        return recon, mu, sig
+        std = torch.exp(0.5 * sig).clamp(min=1e-6)
+        z = mu + std * torch.randn_like(std)
+        return self.decode(z), mu, sig
+
