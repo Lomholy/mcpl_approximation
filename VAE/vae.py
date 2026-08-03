@@ -1,19 +1,16 @@
-import cProfile
-import pstats
 import sys
 sys.path.append("..")
-from data_load import load_mcpl_file, preprocess_nn
+from data_load import load_mcpl_file, transform
 import numpy as np
 import torch
-import os
 from torch.utils.data import TensorDataset, DataLoader, random_split
-from vae_definition import VAE, vae_loss
+from torch.nn import functional as F
+from vae_definition import VAE
 import argparse
 import time
-import matplotlib.pyplot as plt
-from torch.profiler import profile, ProfilerActivity, record_function
+from tqdm import tqdm
+import copy
 
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
 # ==============================================================================
@@ -27,18 +24,9 @@ def add_arguments():
 
     parser.add_argument(
             "--n_particles",
-            default=1e+5,
+            default=1e+6,
             help="Number of particles used in training the variational auto encoder")
 
-    parser.add_argument(
-        "--epochs", type=int, default=200, help="Number of training epochs"
-    )
-
-    parser.add_argument(
-        "--kl_weight", type=float, default=0.2, help="KL divergence weight"
-    )
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-    parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
     parser.add_argument(
         "--device",
         type=str,
@@ -48,6 +36,38 @@ def add_arguments():
     return parser
 
 
+def sigmoid(x, top, center, slope=0.05):
+    return (top)/(1+np.exp((center - x)*slope))
+
+
+def vae_loss(model, x, kl_weight, epoch, total_epochs):
+
+    recon, mu, sig = model(x)
+    if torch.any(torch.isnan(recon)) or torch.any(torch.isnan(mu)) or torch.any(torch.isnan(sig)):
+        print("NaN detected! model output")
+        print(recon, mu, sig)
+        exit(0)
+    w = min(1.0, (epoch + 1) / (0.3 * total_epochs))
+    kl = kl_weight * w
+    latent_loss = - kl * 0.5 * torch.mean(1 + sig - sig.exp() - mu**2)
+
+    # Reconstruction loss (L1)
+    reconstruction_loss = F.mse_loss(recon, x, reduction="mean")
+    # Total VAE loss
+    vae_loss = reconstruction_loss + latent_loss
+    if torch.isnan(reconstruction_loss) or torch.isnan(latent_loss):
+        print("NaN detected!")
+        print(reconstruction_loss, latent_loss)
+        exit(0)
+
+    return vae_loss, reconstruction_loss, latent_loss
+
+
+def update_ema(ema, model, decay=0.999):
+    with torch.no_grad():
+        for p_ema, p in zip(ema.parameters(), model.parameters()):
+            p_ema.mul_(decay).add_(p, alpha=1.0 - decay)
+
 # ==============================================================================
 # ===================== Single training run ==================================
 # ==============================================================================
@@ -55,81 +75,106 @@ def add_arguments():
 
 def train_vae(
     train_loader,
-    hyperparameters,
+    val_loader,
+    epochs,
+    kl_weight,
     device,
     filename="vae_best.pth"
 ):
     start = time.time()
-    best_val = float("inf")
     train_losses = []
+    val_losses = []
 
     vae = VAE().to(device)
-    optimizer = torch.optim.Adam(vae.parameters(), lr=hyperparameters["lr"])
-    for epoch in range(hyperparameters["epochs"]):
+    optimizer = torch.optim.Adam(vae.parameters(), lr=3e-4)
+    ema = copy.deepcopy(vae).eval().requires_grad_(False)
 
-        kl_weight = hyperparameters["kl_weight"]
+    for epoch in tqdm(range(epochs)):
+
         vae.train()
         for (x,) in train_loader:
             x = x.to(device)
-            recon, mu, sig = vae(x)
-            loss, recon_loss, kl_loss = vae_loss(
-                recon, x, mu, sig,
-                kl_weight=kl_weight, current_epoch=epoch,
-                total_epochs=hyperparameters["epochs"]
-            )
-
+            loss, recon_loss, kl_loss = vae_loss(vae, x,
+                                                 kl_weight, epoch=epoch,
+                                                 total_epochs=epochs
+                                                 )
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(vae.parameters(), 1.0)
             optimizer.step()
+            update_ema(ema, vae)
 
+        epoch_time = time.time()
+
+        if epoch % 5 == 0:
+            vae.eval()
+            ema.eval()
             train_losses.append(loss.item())
 
-        vae.eval()
-        epoch_time = time.time()
-        print(f"Epoch {epoch}\ttrain={loss.item():.4g}\tBest loss = {best_val:.4g}")
-        print(f"Latent loss = {kl_loss:.4g}\t reconstruction loss {recon_loss:.4g}")
-        print(f"Time elapsed {epoch_time - start:.1f}\n")
 
-        if (loss < best_val or epoch < 2/3 * hyperparameters["epochs"]):
-            best_val = loss
+            with torch.no_grad():
+                val_loss = 0.0
+                n = 0
+                for (x_val,) in val_loader:
+                    x_val = x_val.to(device)
+                    val_loss += vae_loss(
+                        ema,
+                        x_val,
+                        kl_weight,
+                        epoch=epoch,
+                        total_epochs=epochs
+                    )[0].item()
+                    n += 1
+                val_loss /= n
+
+            val_losses.append([epoch, val_loss])
+
+            print(f"Saving best model at step {epoch}")
+            print(f"step {epoch}: train {loss.item():.5g}, val {val_loss:.5g}")
+            print(f"Latent loss = {kl_loss:.4g}\t reconstruction loss {recon_loss:.4g}")
+            print(f"Time elapsed {epoch_time - start:.1f}\n")
+
             torch.save(
                 {
-                    "state_dict": vae.state_dict(),
-                    "hyperparameters": hyperparameters,
+                    "state_dict": ema.state_dict(),
+                    "step": epoch,
+                    "val_loss": val_losses,
                 },
                 filename,
             )
-    return train_losses
-
+    return train_losses, val_losses
 # ==============================================================================
 # =================== END OF FUNCTION DEFINITIONS ==============================
 # ==============================================================================
-
 
 
 if __name__ == "__main__":
     parser = add_arguments()
     args = parser.parse_args()
     device = args.device
-    batch_size = args.batch_size
     n_particles = int(args.n_particles)
-    hyperparameters = {
-        "epochs": args.epochs,
-        "kl_weight": args.kl_weight,
-        "lr": args.lr,
-    }
+
+    batch_size = 1024
+    kl_weight = 1
+    epochs = 111
+    
     data = load_mcpl_file("../ODIN.mcpl.gz", n_particles)
-    data, mins, dxs = preprocess_nn(data)
-    # Save normalization params
-    np.save("normalization_params.npy", np.array([mins, dxs]))
-    with cProfile.Profile() as prof:
-        dataset = TensorDataset(data)
-        train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-        train_losses = train_vae(
-                train_loader, hyperparameters, device=device
-            )
-        np.save("vae_train_losses.npy", train_losses)
-        stats = pstats.Stats(prof)
-        stats.sort_stats(pstats.SortKey.TIME)
-        stats.dump_stats("profile_results.prof")
-        # stats.print_stats()
+    data = torch.asarray(transform(data), dtype=torch.float32)
+    torch.save(torch.asarray(data), "../gaussian_input.pkl")
+
+    dataset = TensorDataset(data)
+    
+    # split dataset
+    val_size = int(0.1 * len(dataset))
+    train_size = len(dataset) - val_size
+    train_ds, val_ds = random_split(dataset, [train_size, val_size])
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_loader   = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+
+    train_losses, val_losses = train_vae(
+            train_loader, val_loader, epochs, kl_weight, device=device
+        )
+    np.save("vae_train_losses.npy", train_losses)
+    np.save("vae_val_losses.npy", val_losses)
+
