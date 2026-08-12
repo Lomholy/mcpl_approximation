@@ -7,6 +7,7 @@ import sys
 
 sys.path.append("..")
 from plotting import plot_correlations_7d
+from data_load import save_data_as_mcpl
 
 
 # ==============================================================================
@@ -57,7 +58,7 @@ vae.eval()
 with torch.no_grad():
     # Only include samples if they are within the limits of the original data
 
-    n_samples = 1_000_00
+    n_samples = 1_000_000
     samples = []
     while len(samples) < n_samples:
         print(len(samples))
@@ -71,6 +72,7 @@ with torch.no_grad():
 plot_losses()
 plot_correlations_7d(samples, "Synthetic VAE: correlations postprocessed")
 
+torch.save(samples, "gaussian_output.pkl")
 # save_data_as_mcpl(samples, "../vae_samples")
 
 

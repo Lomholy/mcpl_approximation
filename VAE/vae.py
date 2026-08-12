@@ -1,17 +1,16 @@
+import copy
+from tqdm import tqdm
+import time
+import argparse
+from vae_definition import VAE
+from torch.nn import functional as F
+from torch.utils.data import TensorDataset, DataLoader, random_split
+import torch
+import numpy as np
 import sys
+
 sys.path.append("..")
 from data_load import load_mcpl_file, transform
-import numpy as np
-import torch
-from torch.utils.data import TensorDataset, DataLoader, random_split
-from torch.nn import functional as F
-from vae_definition import VAE
-import argparse
-import time
-from tqdm import tqdm
-import copy
-
-
 
 # ==============================================================================
 # ===================== ARGUMENT PARSING ==================================
@@ -23,9 +22,10 @@ def add_arguments():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-            "--n_particles",
-            default=1e+6,
-            help="Number of particles used in training the variational auto encoder")
+        "--n_particles",
+        default=1e6,
+        help="Number of particles used in training the variational auto encoder",
+    )
 
     parser.add_argument(
         "--device",
@@ -37,22 +37,33 @@ def add_arguments():
 
 
 def sigmoid(x, top, center, slope=0.05):
-    return (top)/(1+np.exp((center - x)*slope))
+    return (top) / (1 + np.exp((center - x) * slope))
 
 
 def vae_loss(model, x, kl_weight, epoch, total_epochs):
 
     recon, mu, sig = model(x)
-    if torch.any(torch.isnan(recon)) or torch.any(torch.isnan(mu)) or torch.any(torch.isnan(sig)):
+    if (
+        torch.any(torch.isnan(recon))
+        or torch.any(torch.isnan(mu))
+        or torch.any(torch.isnan(sig))
+    ):
         print("NaN detected! model output")
         print(recon, mu, sig)
         exit(0)
-    w = min(1.0, (epoch + 1) / (0.3 * total_epochs))
-    kl = kl_weight * w
-    latent_loss = - kl * 0.5 * torch.mean(1 + sig - sig.exp() - mu**2)
+    # w = min(1.0, (epoch + 1) / (0.3 * total_epochs))
+    kl = 0.1 * kl_weight  # * w
+    gs = 0.1
+    latent_loss = -kl * 0.5 * torch.mean(1 + sig - sig.exp() - mu**2)
 
     # Reconstruction loss (L1)
-    reconstruction_loss = F.mse_loss(recon, x, reduction="mean")
+    rec_sig, rec_mu = torch.std_mean(recon, dim=None)
+    reconstruction_loss = (
+        F.mse_loss(recon, x, reduction="mean")
+        # + gs*abs((rec_sig**2).log() + (recon - rec_mu)**2 / rec_sig**2).sum(dim=1).mean()
+        + torch.abs(1 - rec_sig)
+        #+ torch.abs(rec_mu)
+    )
     # Total VAE loss
     vae_loss = reconstruction_loss + latent_loss
     if torch.isnan(reconstruction_loss) or torch.isnan(latent_loss):
@@ -68,18 +79,14 @@ def update_ema(ema, model, decay=0.999):
         for p_ema, p in zip(ema.parameters(), model.parameters()):
             p_ema.mul_(decay).add_(p, alpha=1.0 - decay)
 
+
 # ==============================================================================
 # ===================== Single training run ==================================
 # ==============================================================================
 
 
 def train_vae(
-    train_loader,
-    val_loader,
-    epochs,
-    kl_weight,
-    device,
-    filename="vae_best.pth"
+    train_loader, val_loader, epochs, kl_weight, device, filename="vae_best.pth"
 ):
     start = time.time()
     train_losses = []
@@ -90,14 +97,12 @@ def train_vae(
     ema = copy.deepcopy(vae).eval().requires_grad_(False)
 
     for epoch in tqdm(range(epochs)):
-
         vae.train()
         for (x,) in train_loader:
             x = x.to(device)
-            loss, recon_loss, kl_loss = vae_loss(vae, x,
-                                                 kl_weight, epoch=epoch,
-                                                 total_epochs=epochs
-                                                 )
+            loss, recon_loss, kl_loss = vae_loss(
+                vae, x, kl_weight, epoch=epoch, total_epochs=epochs
+            )
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(vae.parameters(), 1.0)
@@ -111,18 +116,13 @@ def train_vae(
             ema.eval()
             train_losses.append(loss.item())
 
-
             with torch.no_grad():
                 val_loss = 0.0
                 n = 0
                 for (x_val,) in val_loader:
                     x_val = x_val.to(device)
                     val_loss += vae_loss(
-                        ema,
-                        x_val,
-                        kl_weight,
-                        epoch=epoch,
-                        total_epochs=epochs
+                        ema, x_val, kl_weight, epoch=epoch, total_epochs=epochs
                     )[0].item()
                     n += 1
                 val_loss /= n
@@ -143,6 +143,8 @@ def train_vae(
                 filename,
             )
     return train_losses, val_losses
+
+
 # ==============================================================================
 # =================== END OF FUNCTION DEFINITIONS ==============================
 # ==============================================================================
@@ -155,26 +157,25 @@ if __name__ == "__main__":
     n_particles = int(args.n_particles)
 
     batch_size = 1024
-    kl_weight = 1
-    epochs = 111
-    
+    kl_weight = 0.6
+    epochs = 100
+
     data = load_mcpl_file("../ODIN.mcpl.gz", n_particles)
     data = torch.asarray(transform(data), dtype=torch.float32)
     torch.save(torch.asarray(data), "../gaussian_input.pkl")
 
     dataset = TensorDataset(data)
-    
+
     # split dataset
     val_size = int(0.1 * len(dataset))
     train_size = len(dataset) - val_size
     train_ds, val_ds = random_split(dataset, [train_size, val_size])
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    val_loader   = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
 
     train_losses, val_losses = train_vae(
-            train_loader, val_loader, epochs, kl_weight, device=device
-        )
+        train_loader, val_loader, epochs, kl_weight, device=device
+    )
     np.save("vae_train_losses.npy", train_losses)
     np.save("vae_val_losses.npy", val_losses)
-
