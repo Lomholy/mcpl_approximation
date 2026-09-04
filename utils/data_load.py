@@ -136,11 +136,11 @@ def get_transformer_limits(file_path = "gaussian_transformer.bin" ):
 
 def transform(data, jitter=1e-12, file_path="gaussian_transformer.bin"):
     rng = np.random.default_rng()
-    data = np.asarray(data, dtype=np.float64)
+    data = np.asarray(data, dtype=np.float32)
 
     n, d = data.shape
 
-    grid = (np.arange(n, dtype=np.float64) + 0.5) / n
+    grid = (np.arange(n, dtype=np.float32) + 0.5) / n
     sorted_cols = []
 
     output = np.zeros((n, d), dtype=np.float32)
@@ -153,13 +153,13 @@ def transform(data, jitter=1e-12, file_path="gaussian_transformer.bin"):
 
         order = np.argsort(col + noise, kind="mergesort")
 
-        ranks = np.zeros(n, dtype=np.float64)
-        ranks[order] = np.arange(n, dtype=np.float64)
+        ranks = np.zeros(n, dtype=np.float32)
+        ranks[order] = np.arange(n, dtype=np.float32)
 
         u = (ranks + 0.5) / n
 
         output[:, j] = normal_icdf_np(u).astype(np.float32)
-        sorted_cols.append(np.sort(col).astype(np.float64))
+        sorted_cols.append(np.sort(col).astype(np.float32))
     save_transform_binary(file_path, grid, sorted_cols)
     return output
 
