@@ -1,14 +1,13 @@
 import sys
-sys.path.append("..")
+sys.path.append("../../utils/")
+from data_load import inverse_transform, get_transformer_limits
 from plotting import plot_correlations_7d
-from data_load import postprocess_nn, save_data_as_mcpl
-from nf_definition import VelocityField
+from model import VelocityField
 import torch
 import matplotlib.pyplot as plt
 import argparse
 import numpy as np
 from tqdm import tqdm
-import pickle
 import time
 
 def sample_flow(model, n_samples, device="mps", t_steps=256):
@@ -34,19 +33,16 @@ n_samples = int(args.n_samples)
 device = "mps"
 
 
-ckpt = torch.load("./MVP_flowModel.pth", map_location=device)
+ckpt = torch.load("../../data_files/models/CFM.pth", map_location=device)
 
 nf = VelocityField().to(device)
 nf.load_state_dict(ckpt["state_dict"])
 nf.eval()
 
-lims = np.load("../limits.npy") 
-
+lims, grid, cols = get_transformer_limits(file_path="../../data_files/preprocess/gaussian_transformer.bin")
 
 mins = torch.asarray(lims[0], dtype=torch.float32, device="cpu")
 maxs = torch.asarray(lims[1], dtype=torch.float32, device="cpu")
-with open('gaussian_transformer.pkl', 'rb') as inp:
-    transformer = pickle.load(inp)
 
 
 samples = []
@@ -56,10 +52,11 @@ while len(samples) < n_samples:
     print(len(samples))
     # Limit samples to within the preprocessed data limits
     batch = sample_flow(nf, batch_size).cpu()
-    gaussian_samples = gaussian_samples + batch.tolist()
-    batch = torch.asarray(transformer.inverse_transform(batch))
+    gaussian_batch = batch
+    batch = torch.asarray(inverse_transform(batch, file_path="../../data_files/preprocess/gaussian_transformer.bin"))
     mask = (batch >= mins) & (batch <= maxs)
     batch = batch[mask.all(axis=1)]
+    gaussian_samples = gaussian_samples + gaussian_batch[mask.all(axis=1)].tolist()
     samples = samples + batch.tolist()
     print(f"Time passed = {time.time() - start}")
 samples = samples[:n_samples]
@@ -69,9 +66,8 @@ gaussian_samples = torch.asarray(gaussian_samples)
 
 print(f"Actually plotted samples = {samples.shape[0]}")
 if args.plot:
-    plot_correlations_7d(gaussian_samples, "MVP Synthetic CFM: Gaussian samples", filename="gauss_output.png")
-    plot_correlations_7d(samples, "MVP Synthetic CFM: correlations", filename="raw_output.png")
+    plot_correlations_7d(gaussian_samples, "CFM: Gaussian space", filename="../../data_files/correlations/CFM_gauss.png")
+    plot_correlations_7d(samples, "CFM: neutron phase space", filename="../../data_files/correlations/CFM_neutron.png")
 
-# save_data_as_mcpl(samples, "../mvp_cmf_samples")
-# torch.save(gaussian_samples, "../mvp_gaussian_output.pkl")
+# torch.save(gaussian_samples, "../../data_files/model_samples/cfm_gauss.pkl")
 plt.show()
