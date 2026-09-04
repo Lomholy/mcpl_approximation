@@ -3,12 +3,24 @@ import mcpl
 import numpy as np
 import torch
 import np2mcpl
+import math
+import h5py
 
 
 def load_mcpl_file(
-    filepath: str, n_particles: int, offset: int = 0, print_status: bool = False
+    filepath: str, n_particles: int = 0, offset: int = 0, print_status: bool = False
 ):
     mcplfile = mcpl.MCPLFile(filepath)
+    max_p = mcplfile.nparticles
+    if n_particles == 0:
+        print(f"load_mcpl_file: Loading all {max_p} neutrons in mcpl file")
+        n_particles = max_p
+    if max_p < n_particles:
+        print(f"load_mcpl_file: Warning! Requested {n_particles} neutrons," 
+              + f" but there were only {max_p} neutrons available." )
+        print(f"Loading {max_p} neutrons.")
+        n_particles = max_p
+
     data = np.zeros([n_particles, 7], dtype=np.float32)
 
     for i, p in enumerate(mcplfile.particles):
@@ -28,13 +40,7 @@ def load_mcpl_file(
 
 def dim_reduction(data):
     out = torch.zeros((data.shape[0], 6))
-    out[:, 0:2] = data[:, 0:2]
-    ux, uy, uz = data[:, 2], data[:, 3], data[:, 4]
-    theta = torch.atan2(torch.sqrt(ux * ux + uy * uy), uz)
-    phi = torch.atan2(uy, ux)
-    out[:, 2] = theta
-    out[:, 3] = phi
-    out[:, 4:] = data[:, 5:7]
+    out[:, 0:7] = data[:, 0:7]
     return out
 
 
@@ -72,6 +78,106 @@ def preprocess(data):
     data[:, 5] = torch.logit(y, eps=eps)
 
     return data, xmin, ymin, dx, dy
+
+
+# ==============================================================================
+# =================     IMPLEMENT RANK GAUSSIAN SCALING ========================
+# ==============================================================================
+SQRT2 = math.sqrt(2.0)
+
+
+def save_transform_binary(path, grid, sorted_cols):
+    grid = np.asarray(grid, dtype=np.float64)
+    sorted_cols = np.asarray(sorted_cols, dtype=np.float64)
+
+    n = grid.shape[0]
+    d = sorted_cols.shape[0]
+
+    assert sorted_cols.shape == (d, n)
+
+    with open(path, "wb") as f:
+        np.array([n], dtype=np.int32).tofile(f)
+        np.array([d], dtype=np.int32).tofile(f)
+        grid.tofile(f)
+        sorted_cols.tofile(f)
+
+
+def load_transform_binary(path):
+    with open(path, "rb") as f:
+        n = np.fromfile(f, dtype=np.int32, count=1)[0]
+        d = np.fromfile(f, dtype=np.int32, count=1)[0]
+
+        grid = np.fromfile(f, dtype=np.float64, count=n)
+        sorted_cols = np.fromfile(f, dtype=np.float64, count=n * d)
+
+    sorted_cols = sorted_cols.reshape(d, n)
+
+    return grid, sorted_cols
+
+
+def normal_icdf_np(u):
+    u = np.asarray(u, dtype=np.float64)
+    u = np.clip(u, 1e-7, 1.0 - 1e-7)
+
+    t = torch.from_numpy(2.0 * u - 1.0)
+    return (SQRT2 * torch.erfinv(t)).numpy()
+
+
+def normal_cdf_np(z):
+    z = torch.as_tensor(z, dtype=torch.float64)
+    return (0.5 * (1.0 + torch.erf(z / SQRT2))).numpy()
+
+
+def transform(data, jitter=1e-12, file_path="gaussian_transformer.bin"):
+    rng = np.random.default_rng()
+    data = np.asarray(data, dtype=np.float64)
+
+    n, d = data.shape
+
+    grid = (np.arange(n, dtype=np.float64) + 0.5) / n
+    sorted_cols = []
+
+    output = np.zeros((n, d), dtype=np.float32)
+
+    for j in range(d):
+        col = data[:, j]
+
+        scale = np.std(col)
+        noise = rng.normal(0.0, jitter * max(scale, 1.0), size=n)
+
+        order = np.argsort(col + noise, kind="mergesort")
+
+        ranks = np.zeros(n, dtype=np.float64)
+        ranks[order] = np.arange(n, dtype=np.float64)
+
+        u = (ranks + 0.5) / n
+
+        output[:, j] = normal_icdf_np(u).astype(np.float32)
+        sorted_cols.append(np.sort(col).astype(np.float64))
+    save_transform_binary(file_path, grid, sorted_cols)
+    return output
+
+
+def inverse_transform(data, file_path="gaussian_transformer.bin"):
+    grid, sorted_cols = load_transform_binary(file_path)
+    data = np.asarray(data, dtype=np.float64)
+    u = normal_cdf_np(data)
+
+    n, d = data.shape
+    output = np.zeros((n, d), dtype=np.float32)
+
+    lo = grid[0]
+    hi = grid[-1]
+
+    for j in range(d):
+        uj = np.clip(u[:, j], lo, hi)
+        output[:, j] = np.interp(uj, grid, sorted_cols[j])
+
+    return output
+
+# ==============================================================================
+# ==============================================================================
+# ==============================================================================
 
 
 def normalize(data):
@@ -145,11 +251,11 @@ def postprocess_nn(data, mins=None, dxs=None, filename=""):
 
 def save_data_as_mcpl(data, filename):
     # Convert the input data which is 6d, to np2mcpl data, which is 10 d
-    output = np.zeros((data.shape[0], 10))
+    output = np.zeros((data.shape[0], 10), dtype=np.float32)
     output[:, 0] = 2112  # PDG code
     output[:, 1] = data[:, 5]  # Position in xy
     output[:, 2] = data[:, 6]  # Position in xy
-    output[:, 3] = 6000  # Position in Z
+    output[:, 3] = 6040  # Position in Z
     # Convert angles into direction vector
     output[:, 4] = data[:, 2]
     output[:, 5] = data[:, 3]
