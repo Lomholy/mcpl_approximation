@@ -9,7 +9,7 @@ __pycache__/
 # Some folders are not under version control because they are produced.
 data_files
 presentations
-odin
+input_instrument
 bootstrapping
 figures
 np2mcpl-0.1.0
