@@ -2,14 +2,14 @@ import copy
 from tqdm import tqdm
 import time
 import argparse
-from vae_definition import VAE
+from model import VAE
 from torch.nn import functional as F
 from torch.utils.data import TensorDataset, DataLoader, random_split
 import torch
 import numpy as np
 import sys
 
-sys.path.append("..")
+sys.path.append("../../utils/")
 from data_load import load_mcpl_file, transform
 
 # ==============================================================================
@@ -86,7 +86,7 @@ def update_ema(ema, model, decay=0.999):
 
 
 def train_vae(
-    train_loader, val_loader, epochs, kl_weight, device, filename="vae_best.pth"
+    train_loader, val_loader, epochs, kl_weight, device, filename="../../data_files/models/vae.pth"
 ):
     start = time.time()
     train_losses = []
@@ -158,11 +158,10 @@ if __name__ == "__main__":
 
     batch_size = 1024
     kl_weight = 0.6
-    epochs = 100
+    epochs = 10
 
-    data = load_mcpl_file("../ODIN.mcpl.gz", n_particles)
-    data = torch.asarray(transform(data), dtype=torch.float32)
-    torch.save(torch.asarray(data), "../gaussian_input.pkl")
+    data = load_mcpl_file("../../data_files/ODIN.mcpl.gz", n_particles)
+    data = torch.asarray(transform(data, file_path="../../data_files/preprocess/gaussian_transformer.bin"), dtype=torch.float32)
 
     dataset = TensorDataset(data)
 
@@ -177,5 +176,6 @@ if __name__ == "__main__":
     train_losses, val_losses = train_vae(
         train_loader, val_loader, epochs, kl_weight, device=device
     )
-    np.save("vae_train_losses.npy", train_losses)
-    np.save("vae_val_losses.npy", val_losses)
+    np.save("../../data_files/losses/vae_train.npy", train_losses)
+    np.save("../../data_files/losses/vae_val.npy", val_losses)
+
