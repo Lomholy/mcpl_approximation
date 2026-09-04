@@ -127,6 +127,12 @@ def normal_cdf_np(z):
     z = torch.as_tensor(z, dtype=torch.float64)
     return (0.5 * (1.0 + torch.erf(z / SQRT2))).numpy()
 
+def get_transformer_limits(file_path = "gaussian_transformer.bin" ):
+    grid, sorted_cols = load_transform_binary(file_path)
+    lims = (sorted_cols[:,0], sorted_cols[:,-1])
+
+    return lims, grid, sorted_cols
+
 
 def transform(data, jitter=1e-12, file_path="gaussian_transformer.bin"):
     rng = np.random.default_rng()
