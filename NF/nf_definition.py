@@ -47,9 +47,9 @@ class VelocityField(nn.Module):
     def __init__(
         self,
         input_dim=7,
-        width=512,
-        depth=8,
-        time_dim=128,
+        width=64,
+        depth=3,
+        time_dim=28,
     ):
         super().__init__()
 

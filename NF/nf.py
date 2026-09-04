@@ -2,7 +2,7 @@ import sys
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 sys.path.append("..")
-from data_load import load_mcpl_file, preprocess_nn, RankGaussianizer, save_data_as_mcpl
+from data_load import load_mcpl_file, transform, inverse_transform
 from plotting import plot_correlations_7d
 from nf_definition import VelocityField, sample_t
 import argparse
@@ -11,7 +11,7 @@ import torch
 import numpy as np
 import pickle
 import copy
-
+import matplotlib.pyplot as plt
 
 # ==============================================================================
 # ARGUMENT PARSING
@@ -20,7 +20,7 @@ import copy
 
 def add_arguments(parser):
     parser.add_argument("--n_particles", default=1e6)
-    parser.add_argument("--model_filename", default="flowModel.pth")
+    parser.add_argument("--model_filename", default="MVP_flowModel.pth")
     parser.add_argument("--device", default="mps")
 
 
@@ -134,15 +134,10 @@ add_arguments(parser)
 args = parser.parse_args()
 data = load_mcpl_file("../ODIN.mcpl.gz", int(args.n_particles))
 plot_correlations_7d(data, title="Raw input data", filename="raw_input.png")
-transformer = RankGaussianizer()
-data = torch.asarray(transformer.fit_transform(data), dtype=torch.float32)
+data = torch.asarray(transform(data), dtype=torch.float32)
 torch.save(torch.asarray(data), "../gaussian_input.pkl")
-
-
-with open('gaussian_transformer.pkl', 'wb') as outp:
-    pickle.dump(transformer, outp, pickle.HIGHEST_PROTOCOL)
 plot_correlations_7d(data, title="Rank Gaussianized input data", filename="gauss_input.png")
-
+exit()
 dim = data.shape[1]
 device = args.device
 

@@ -34,7 +34,7 @@ n_samples = int(args.n_samples)
 device = "mps"
 
 
-ckpt = torch.load("flowModel.pth", map_location=device)
+ckpt = torch.load("./MVP_flowModel.pth", map_location=device)
 
 nf = VelocityField().to(device)
 nf.load_state_dict(ckpt["state_dict"])
@@ -69,9 +69,9 @@ gaussian_samples = torch.asarray(gaussian_samples)
 
 print(f"Actually plotted samples = {samples.shape[0]}")
 if args.plot:
-    plot_correlations_7d(gaussian_samples, "Synthetic CFM: Gaussian samples", filename="gauss_output.png")
-    plot_correlations_7d(samples, "Synthetic CFM: correlations", filename="raw_output.png")
+    plot_correlations_7d(gaussian_samples, "MVP Synthetic CFM: Gaussian samples", filename="gauss_output.png")
+    plot_correlations_7d(samples, "MVP Synthetic CFM: correlations", filename="raw_output.png")
 
-save_data_as_mcpl(samples, "../cmf_samples")
-torch.save(gaussian_samples, "../gaussian_output.pkl")
+# save_data_as_mcpl(samples, "../mvp_cmf_samples")
+# torch.save(gaussian_samples, "../mvp_gaussian_output.pkl")
 plt.show()
