@@ -32,27 +32,28 @@ fig, ax = plt.subplots()
 ax.plot(
     results["input"][0],
     results["input"][1],
-    ".b",
+    "+b", alpha=0.8,
     label="McStas MCPL 10^6 L2",
 )
 
 ax.plot(
     results["fm"][0],
     results["fm"][1],
-    ".r",
-    label="CFM MCPL 10^8 L2",
+    "+r", alpha=0.8,
+    label="CFM MCPL 10^7 L2",
 )
 ax.plot(
     results["big"][0],
     results["big"][1],
-    ".g",
-    label="McStas MCPL 2.5*10^8 L2",
+    "+g", alpha=0.8,
+    label="McStas MCPL 2.5*10^7 L2",
 )
 
 # for i in range(4):
 #     print(f"Raw number {results["raw"][0][i]}")
 #     print(f"Loss is {results["raw"][1][i]:.2g}")
 ax.hlines(y=results["raw"][1], xmin=0, xmax=25_700_000, linestyles=["--"], label="Target loss")
+ax.vlines(x=1_000_000, ymin=1e8, ymax=1e15, color="purple",linestyles=["--"], label="Trained particle count")
 ax.legend()
 ax.set(
     yscale="log", ylim=(1e8,1e15), xscale="log", xlabel="Number of particles [#]", ylabel="MSE [dI**2]"

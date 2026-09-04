@@ -7,8 +7,8 @@ import numpy as np
 import copy
 
 
-def split_mcpl_file(mcpl_file, requested_sizes, filename, input_particles, original_data=None):
-    data = load_mcpl_file(mcpl_file, n_particles=input_particles).numpy()
+def split_mcpl_file(mcpl_file, requested_sizes, filename, original_data=None):
+    data = load_mcpl_file(mcpl_file).numpy()
 
     if original_data is None:
         original_data = data
@@ -34,10 +34,10 @@ def split_mcpl_file(mcpl_file, requested_sizes, filename, input_particles, origi
 if __name__ == "__main__":
 
     requested_sizes = np.geomspace(100, 25_416_962, 70, dtype=int)
-    original_data = load_mcpl_file("../ODIN.mcpl.gz", n_particles=1_000_000).numpy()
-    split_mcpl_file("../ODIN.mcpl.gz", requested_sizes, "./mcpl_files/input", 1_000_000)
-    split_mcpl_file("../ODIN_n11.mcpl.gz", requested_sizes, "./mcpl_files/big", 25_416_962)
-    split_mcpl_file("../cmf_samples.mcpl.gz", requested_sizes, "./mcpl_files/cfm", 10_000_000, original_data)
+    original_data = load_mcpl_file("../ODIN.mcpl.gz").numpy()
+    split_mcpl_file("../ODIN.mcpl.gz", requested_sizes, "./mcpl_files/input")
+    split_mcpl_file("../ODIN_n11.mcpl.gz", requested_sizes, "./mcpl_files/big")
+    split_mcpl_file("../cmf_samples.mcpl.gz", requested_sizes, "./mcpl_files/cfm", original_data)
 
 
 
