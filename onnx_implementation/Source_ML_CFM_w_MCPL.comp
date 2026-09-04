@@ -1,0 +1,705 @@
+/*******************************************************************************
+*
+* McStas, neutron ray-tracing package
+*         Copyright 1997-2026, All rights reserved
+*         Risoe National Laboratory, Roskilde, Denmark
+*         Institut Laue Langevin, Grenoble, France
+*
+* Component: Source_ML_CFM
+*
+* %I
+* Written by: Daniel Lomholt Christensen 
+* Date: June 1st, 2026
+* Origin: NBI@UCPH funded by ACTNXT
+*
+* A source that samples from a machine learning model (Type Conditional Flow Matching)
+*
+* %D
+* This component 
+*
+*
+* Example: Source_simple(radius=0.1, dist=2, focus_xw=.1, focus_yh=.1, E0=14, dE=2)
+*
+* %P
+* gauss: [1]                          Gaussian (1) or Flat (0) energy/wavelength distribution
+*
+* %E
+*******************************************************************************/
+
+DEFINE COMPONENT Source_ML_CFM
+
+SETTING PARAMETERS (string ML_filename="",
+                    string transformer_filename = "",
+                    int batch_size = 1000,
+                    int t_steps = 256,
+                    verbose=1,
+                    write_to_mcpl_file = 0,
+                    string filename=0, int weight_mode=-1, 
+                    int polarisationuse=0, int doubleprec=0,
+                    string userflag="",  string userflagcomment="",
+                    buffermax=0
+)
+
+
+DEPENDENCY "@MCPLFLAGS@"
+
+
+SHARE
+%{
+  
+
+  #include <stdio.h>
+  #include "onnxruntime/onnxruntime_c_api.h"
+  // #include "../../../../../onnxruntime-osx-arm64-1.26.0/include/coreml_provider_factory.h"
+  #include <stdlib.h>
+  #include <math.h>
+  #include <time.h>
+  #include <mcpl.h>
+  #include <sys/stat.h>
+  
+
+  int mcpl_file_exist (char* filename) {
+    struct stat buffer;
+    return (stat (filename, &buffer) == 0);
+  }
+
+  #define CHECK(status)                                  \
+    if (status != NULL) {                              \
+        fprintf(stderr, "Error: %s\n",                 \
+                api->GetErrorMessage(status));         \
+        api->ReleaseStatus(status);                   \
+        exit(1);                                      \
+    }
+
+  // Functions for Gauss rank scaling
+  #include <stdio.h>
+  #include <stdlib.h>
+  #include <math.h>
+
+  #define SQRT2 1.4142135623730951
+
+// --------------------------------------------------
+// Load binary transform
+// --------------------------------------------------
+void load_transform_binary(char* path,
+                           int* n, int* d,
+                           double** grid,
+                           double** sorted_cols)
+{
+    FILE* f = fopen(path, "rb");
+    if (!f) {
+        perror("fopen");
+        exit(1);
+    }
+
+    fread(n, sizeof(int), 1, f);
+    fread(d, sizeof(int), 1, f);
+
+    *grid = malloc((*n) * sizeof(double));
+    *sorted_cols = malloc((*n) * (*d) * sizeof(double));
+
+    fread(*grid, sizeof(double), *n, f);
+    fread(*sorted_cols, sizeof(double), (*n) * (*d), f);
+
+    fclose(f);
+}
+
+// --------------------------------------------------
+// Normal CDF (matches your Python version)
+// --------------------------------------------------
+double normal_cdf(double z)
+{
+    return 0.5 * (1.0 + erf(z / SQRT2));
+}
+
+// --------------------------------------------------
+// Linear interpolation (np.interp equivalent)
+// --------------------------------------------------
+double interp(double x, const double* xs, const double* ys, int n)
+{
+    int lo = 0;
+    int hi = n - 1;
+
+    // binary search
+    while (hi - lo > 1) {
+        int mid = (lo + hi) / 2;
+        if (xs[mid] > x)
+            hi = mid;
+        else
+            lo = mid;
+    }
+
+    double t = (x - xs[lo]) / (xs[hi] - xs[lo]);
+    return ys[lo] + t * (ys[hi] - ys[lo]);
+}
+
+// --------------------------------------------------
+// Clamp helper
+// --------------------------------------------------
+double clamp(double x, double lo, double hi)
+{
+    if (x < lo) return lo;
+    if (x > hi) return hi;
+    return x;
+}
+
+// --------------------------------------------------
+// Inverse transform
+// data:    input (n × d) [row-major]
+// output:  output (n × d) [row-major]
+// --------------------------------------------------
+void inverse_transform(const float* data,
+                       float* output,
+                       int n, int d,
+                       char* file_path)
+{
+    int n_file, d_file;
+    double* grid;
+    double* sorted_cols;
+
+    load_transform_binary(file_path, &n_file, &d_file,
+                          &grid, &sorted_cols);
+
+    double lo = grid[0];
+    double hi = grid[n_file - 1];
+
+    for (int j = 0; j < d; j++) {
+        const double* col = &sorted_cols[j * n_file];
+
+        for (int i = 0; i < n; i++) {
+            double z = data[i * d + j];
+
+            // u = normal_cdf(z)
+            double u = normal_cdf(z);
+
+            // clamp
+            u = clamp(u, lo, hi);
+
+            // interpolate
+            output[i * d + j] = (float)interp(u, grid, col, n_file);
+        }
+    }
+
+    free(grid);
+    free(sorted_cols);
+}
+
+
+
+  %}
+/* Neutron parameters: (x,y,z,vx,vy,vz,t,sx,sy,sz,p) */
+DECLARE
+%{
+  int local_id;
+  int idx;
+  int base;
+  const OrtApi* api;
+  int dim;
+  double dt;
+  double tot_vel;
+  OrtValue* xt_tensor;
+  OrtValue* t_tensor;
+  OrtValue* output_tensor;
+  float* xt;
+  float* t_vals;
+  float* output;
+  double weight_norm;
+  double n_training_samples;
+
+  OrtSessionOptions* session_options;
+
+  OrtEnv* env;
+  OrtSession* session;
+
+  OrtMemoryInfo* memory_info;
+  OrtValue* input_tensors[2];
+
+  const char* input_names[2];
+  const char* output_names[1];
+
+  float* output_data;
+
+  // SET VARS FOR WRITING OUTPUT TO MCPL FILE
+  mcpl_outfile_t outputfile;
+  mcpl_particle_t* particle;
+  int userflagenabled;
+  char* outfilename; // "/some/where/myfile.mcpl.gz"
+  double weight_scale;
+  DArray1d X;
+  DArray1d Y;
+  DArray1d Z;
+  DArray1d VX;
+  DArray1d VY;
+  DArray1d VZ;
+  DArray1d SX;
+  DArray1d SY;
+  DArray1d SZ;
+  DArray1d T;
+  DArray1d P;
+  uint32_t *U;
+  int captured;
+
+%}
+INITIALIZE
+%{
+    local_id = 0;
+    api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+
+
+    // Create environment
+    CHECK(api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "test", &env));
+
+    // Create session options
+    CHECK(api->CreateSessionOptions(&session_options));
+    // CHECK(api->SetSessionLogSeverityLevel(session_options, 0));
+    // Optional: set number of threads. 0 means auto
+    CHECK(api->SetIntraOpNumThreads(session_options, 0));
+    CHECK(api->SetInterOpNumThreads(session_options, 0));
+
+    // Set graph optimizations on
+    CHECK(api->SetSessionGraphOptimizationLevel(
+      session_options, ORT_ENABLE_ALL));
+
+    // ========================================================================
+    // =========================== LOAD MODEL =================================
+    // ========================================================================
+    CHECK(api->CreateSession(env, ML_filename, session_options, &session));
+    if (verbose) printf("Model loaded successfully!\n");
+
+
+    // Get number of training samples from metadata
+    OrtModelMetadata* metadata;
+    CHECK(api->SessionGetModelMetadata(session, &metadata));
+    OrtAllocator *allocator;
+    CHECK(api->GetAllocatorWithDefaultOptions(&allocator));
+    char* value = NULL;
+    CHECK(api->ModelMetadataLookupCustomMetadataMap(
+        metadata,
+        allocator,
+        "n_training_samples",
+        &value
+    ));
+    
+    if (value) {
+        n_training_samples = (double)atoi(value);
+        printf("Number of neutron trained on: %s\n", value);
+        allocator->Free(allocator, value);
+    }
+    if (verbose) printf("Loaded metadata successfully!\n");
+    
+
+    // ========================================================================
+    // =========================== PREPARE SAMPLING ===========================
+    // ========================================================================
+
+    dim = 7;
+    dt = 1.0f / t_steps;
+
+    // Create memory info (CPU)
+    CHECK(api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memory_info));
+
+    // Input/output names (adjust if needed!)
+    input_names[0] = "input";
+    input_names[1] = "t";
+    output_names[0] = "output";
+
+    // Shapes
+    int64_t xt_shape[] = {batch_size, dim};
+    int64_t t_shape[]  = {batch_size, 1};
+
+    xt = (float*) malloc(batch_size * dim * sizeof(float));
+    t_vals = (float*) malloc(batch_size * sizeof(float));
+    output   = (float*) malloc(batch_size * dim * sizeof(float));
+
+    // clock_gettime(CLOCK_MONOTONIC, &tot_start);
+    // Create Ort tensors
+
+    CHECK(api->CreateTensorWithDataAsOrtValue(
+        memory_info, xt, batch_size * dim * sizeof(float),
+        xt_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &xt_tensor));
+
+    CHECK(api->CreateTensorWithDataAsOrtValue(
+        memory_info, t_vals, batch_size * sizeof(float),
+        t_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &t_tensor));
+
+    CHECK(api->CreateTensorWithDataAsOrtValue(
+    memory_info, output, batch_size * dim * sizeof(float),
+    xt_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &output_tensor));
+
+    input_tensors[0] = xt_tensor;
+    input_tensors[1] = t_tensor;
+    if (verbose) printf("Arrays allocated successfully. INITIALIZE finished!\n");
+    weight_norm = mcget_ncount()/n_training_samples;
+    printf("Weight norm = %g\n", weight_norm);
+    // ========================================================================
+    // ========================= MCPL FILE INITIALIZE =========================
+    // ========================================================================
+  if (write_to_mcpl_file){
+    {
+      char* tmp = mcfull_file (filename[0] ? filename : NAME_CURRENT_COMP, NULL);
+      outfilename = mcpl_name_helper (tmp, 'G');
+      free (tmp);
+    }
+
+    #if defined (USE_MPI)
+    unsigned long iproc = mpi_node_rank;
+    unsigned long nproc = mpi_node_count;
+    #else
+    unsigned long iproc = 0;
+    unsigned long nproc = 1;
+    #endif
+
+    outputfile = mcpl_create_outfile_mpi (outfilename, iproc, nproc);
+
+    mcpl_enable_universal_pdgcode (outputfile, 2112); /*all particles are neutrons*/
+
+    char line[256];
+    snprintf (line, sizeof (line), "%s %s %s", MCCODE_NAME, MCCODE_VERSION, instrument_name);
+    mcpl_hdr_set_srcname (outputfile, line);
+    snprintf (line, sizeof (line), "Output by COMPONENT: %s", NAME_CURRENT_COMP);
+    mcpl_hdr_add_comment (outputfile, line);
+
+    /*also add the instrument file and the command line as blobs*/
+    if (mcpl_file_exist (instrument_source)) {
+      uint64_t instrsrc_buflen;
+      char* instrsrc_buf = NULL;
+      mcpl_read_file_to_buffer (instrument_source,
+                                100 * 1024 * 1024, // 100mb, must be less than uint32 max
+                                1,                 // text,
+                                &instrsrc_buflen, &instrsrc_buf);
+      mcpl_hdr_add_data (outputfile, "mccode_instr_file", (uint32_t)instrsrc_buflen, instrsrc_buf);
+      free (instrsrc_buf);
+    } else {
+      fprintf (stderr,
+               "\nWarning (%s): Source instrument file (%s)"
+               " not found, hence not embedded.\n",
+               NAME_CURRENT_COMP, instrument_source);
+    }
+
+    {
+      char clr[2048];
+      char* clrp = clr;
+      clrp = clr;
+      clrp += snprintf (clrp, sizeof (clr), "%s", instrument_exe);
+      char Parameters[CHAR_BUF_LENGTH];
+      for (int ii = 0; ii < numipar; ii++) {
+        (*mcinputtypes[mcinputtable[ii].type].printer) (Parameters, mcinputtable[ii].par);
+        clrp += snprintf (clrp, sizeof (clr) - (clrp - clr), " %s=%s", mcinputtable[ii].name, Parameters);
+      }
+      *clrp = '\0';
+      mcpl_hdr_add_data (outputfile, "mccode_cmd_line", strlen (clr), clr);
+    }
+
+    if (weight_mode == -1) {
+      MPI_MASTER (fprintf (stderr,
+                           "\nWarning (%s): weight_mode unspecified so defaulting to 2"
+                           " (classic mode) which will soon become unavailable and tooling"
+                           " might need updating. Please consult"
+                           " https://github.com/mccode-dev/McCode/discussions/2076 for more"
+                           " information.\n",
+                           NAME_CURRENT_COMP););
+      weight_mode = 2;
+    } else if (weight_mode == 2) {
+      MPI_MASTER (fprintf (stderr,
+                           "\nWarning (%s): weight_mode=2 selected. This mode will"
+                           " soon become unavailable. Please consult"
+                           " https://github.com/mccode-dev/McCode/discussions/2076 for more"
+                           " information.\n",
+                           NAME_CURRENT_COMP););
+    }
+    if (weight_mode != 1 && weight_mode != 2) {
+      fprintf (stderr, "\nERROR (%s): Unvalid value of weight_mode provided.\n", NAME_CURRENT_COMP);
+      exit (1);
+    }
+
+    weight_scale = 1.0;
+    if (weight_mode != 2) {
+      mcpl_hdr_add_stat_sum (outputfile, "initial_ray_count", -1.0); // reserve
+      // Multiply with mcget_ncount() to undo division supposedly performed in
+      // source:
+      weight_scale = (double)mcget_ncount ();
+    }
+
+    if (polarisationuse)
+      mcpl_enable_polarisation (outputfile);
+
+    if (doubleprec)
+      mcpl_enable_doubleprec (outputfile);
+
+    userflagenabled = 0;
+    if (userflagcomment && strlen (userflagcomment) != 0) {
+      userflagenabled = 1;
+      mcpl_enable_userflags (outputfile);
+      snprintf (line, 255, "userflags: %s", userflagcomment);
+      mcpl_hdr_add_comment (outputfile, line);
+    }
+
+    #ifndef OPENACC
+    /*pointer to the single particle storage area*/
+    particle = mcpl_get_empty_particle (outputfile);
+    #else
+    particle = NULL;
+    if (!buffermax) {
+      buffermax = mcget_ncount ();
+    }
+    X = create_darr1d (buffermax);
+    Y = create_darr1d (buffermax);
+    Z = create_darr1d (buffermax);
+    VX = create_darr1d (buffermax);
+    VY = create_darr1d (buffermax);
+    VZ = create_darr1d (buffermax);
+    SX = create_darr1d (buffermax);
+    SY = create_darr1d (buffermax);
+    SZ = create_darr1d (buffermax);
+    T = create_darr1d (buffermax);
+    P = create_darr1d (buffermax);
+    if (userflagenabled) {
+      U = calloc(buffermax,sizeof(uint32_t));
+    }
+    captured = 0;
+    #endif
+  }
+
+%}
+TRACE
+%{
+  if (local_id%batch_size == 0){
+    // ========================================================================
+    // ======================== SAMPLING A BATCH OF NEUTRONS ==================
+    // ========================================================================
+
+
+    for (int i = 0; i < batch_size * dim; i++) {
+        float u1 = ((float) rand()) / (float)RAND_MAX;
+        float u2 = ((float) rand()) / (float)RAND_MAX;
+        xt[i] = sqrtf(-2.0f * logf(u1)) * cosf(2.0f * M_PI * u2);
+    }
+
+    for (int step = 0; step < t_steps; step++) {
+
+        float t_scalar = (float) step / (float) t_steps;
+
+        // fill t
+        #pragma omp simd
+        for (int i = 0; i < batch_size; i++) {
+            t_vals[i] = t_scalar;
+        }
+
+        CHECK(api->Run(
+            session, NULL,
+            input_names,
+            (const OrtValue* const*)input_tensors, 2,
+            output_names, 1,
+            &output_tensor
+        ));
+
+        CHECK(api->GetTensorMutableData(output_tensor, (void**)&output_data));
+
+        #pragma omp simd
+        for (int i = 0; i < batch_size * dim; i++) {
+            xt[i] += dt * output_data[i];
+        }
+    }
+    inverse_transform(xt, output_data, batch_size, dim, transformer_filename);
+  }
+  
+  idx = local_id % batch_size;
+  base = idx * dim;
+
+
+  p       = output_data[base + 0]*weight_norm;
+  tot_vel = SE2V * sqrt(output_data[base + 1]*1e9);
+  x       = output_data[base + 5]/100;
+  y       = output_data[base + 6]/100;
+  z       = 0;
+  vx      = output_data[base + 2] * tot_vel;
+  vy      = output_data[base + 3] * tot_vel;
+  vz      = output_data[base + 4] * tot_vel;
+  t       = 0;
+
+  local_id++;
+
+  if (write_to_mcpl_file){
+    #ifdef OPENACC
+    int cap;
+    #pragma acc atomic capture
+    {
+      cap = captured++;
+    }
+
+    //  unsigned long long i=_particle->_uid;// % GPU_INNERLOOP;
+    if (cap < ceil (buffermax)) {
+      X[cap] = x;
+      Y[cap] = y;
+      Z[cap] = z;
+      VX[cap] = vx;
+      VY[cap] = vy;
+      VZ[cap] = vz;
+      SX[cap] = sx;
+      SY[cap] = sy;
+      SZ[cap] = sz;
+      T[cap] = t;
+      P[cap] = p;
+      if (userflagenabled) {
+        int fail;
+        void * vptr = particle_getvar_void (_particle, userflag, &fail);
+        U[cap] = fail ? 0 : *(uint32_t *) vptr;
+      }
+      SCATTER;
+    }
+
+    #else
+    double nrm;
+    /*positions are in cm*/
+    particle->position[0] = x * 100;
+    particle->position[1] = y * 100;
+    particle->position[2] = z * 100;
+
+    if (polarisationuse) {
+      particle->polarisation[0] = sx;
+      particle->polarisation[1] = sy;
+      particle->polarisation[2] = sz;
+    }
+
+    nrm = sqrt (vx * vx + vy * vy + vz * vz);
+    /*ekin is in MeV, in McStas meV*/
+    particle->ekin = VS2E * nrm * nrm / 1e9;
+    particle->direction[0] = vx / nrm;
+    particle->direction[1] = vy / nrm;
+    particle->direction[2] = vz / nrm;
+    /*time in ms:*/
+    particle->time = t * 1e3;
+    /*weight in unspecified units:*/
+    particle->weight = p * weight_scale;
+    if (userflagenabled) {
+      int fail;
+      void * vptr = particle_getvar_void (_particle, userflag, &fail);
+      particle->userflags = fail ? 0 : *(uint32_t *) vptr;
+    }
+
+    MPI_MASTER (if (verbose == 3 && mcrun_num < 10) {
+      printf ("id=%lld\tpdg=2112\tekin=%g MeV\tx=%g cm\ty=%g cm\tz=%g cm\tux=%g\tuy=%g\tuz=%g\tt=%g ms\tweight=%g\tpolx=%g\tpoly=%g\tpolz=%g\n", mcrun_num,
+              particle->ekin, particle->position[0], particle->position[1], particle->position[2], particle->direction[0], particle->direction[1],
+              particle->direction[2], particle->time, particle->weight, particle->polarisation[0], particle->polarisation[1], particle->polarisation[2]);
+    });
+
+    mcpl_add_particle (outputfile, particle);
+
+    SCATTER;
+    #endif
+  }
+
+
+%}
+SAVE 
+%{
+  if (write_to_mcpl_file){
+    #ifdef OPENACC
+  double nrm;
+  unsigned long long i;
+  if (captured > ceil (buffermax)) {
+    fprintf (stderr, "MCPL_output captured %g particles which is more than the buffersize (%g)!\n", (double)captured, buffermax);
+  }
+  mcpl_particle_t Particle;
+  for (i = 0; i < captured; i++) {
+    if (P[i] > 0) {
+      /*positions are in cm*/
+      Particle.position[0] = X[i] * 100;
+      Particle.position[1] = Y[i] * 100;
+      Particle.position[2] = Z[i] * 100;
+
+      if (polarisationuse) {
+        Particle.polarisation[0] = SX[i];
+        Particle.polarisation[1] = SY[i];
+        Particle.polarisation[2] = SZ[i];
+      }
+
+      nrm = sqrt (VX[i] * VX[i] + VY[i] * VY[i] + VZ[i] * VZ[i]);
+      /*ekin is in MeV, in McStas meV*/
+      Particle.ekin = VS2E * nrm * nrm / 1e9;
+      Particle.direction[0] = VX[i] / nrm;
+      Particle.direction[1] = VY[i] / nrm;
+      Particle.direction[2] = VZ[i] / nrm;
+      /*time in ms:*/
+      Particle.time = T[i] * 1e3;
+      /*weight in unspecified units:*/
+      Particle.weight = P[i] * weight_scale;
+      if (userflagenabled)
+        Particle.userflags = (uint32_t)U[i];
+
+      if (verbose == 3 && mcrun_num < 10) {
+        printf ("id=%ld\tpdg=2112\tekin=%g MeV\tx=%g cm\ty=%g cm\tz=%g cm\tux=%g\tuy=%g\tuz=%g\tt=%g ms\tweight=%g\tpolx=%g\tpoly=%g\tpolz=%g\n", mcrun_num,
+                Particle.ekin, Particle.position[0], Particle.position[1], Particle.position[2], Particle.direction[0], Particle.direction[1],
+                Particle.direction[2], Particle.time, Particle.weight, Particle.polarisation[0], Particle.polarisation[1], Particle.polarisation[2]);
+      }
+
+      mcpl_add_particle (outputfile, &Particle);
+    }
+  }
+  #endif
+  }
+
+
+%}
+
+FINALLY 
+%{
+    // Cleanup tensors
+    api->ReleaseValue(xt_tensor);
+    api->ReleaseValue(t_tensor);
+    api->ReleaseValue(output_tensor);
+
+    // Cleanup
+    free(xt);
+    free(t_vals);
+    free(output);
+    api->ReleaseMemoryInfo(memory_info);
+    api->ReleaseSession(session);
+    api->ReleaseSessionOptions(session_options);
+    api->ReleaseEnv(env);
+
+    if (write_to_mcpl_file){
+      if (weight_mode != 2)
+    mcpl_hdr_add_stat_sum (outputfile, "initial_ray_count", (double)mcget_ncount ());
+  mcpl_closeandgzip_outfile (outputfile);
+
+  #ifdef USE_MPI
+  MPI_Barrier (MPI_COMM_WORLD);
+  #endif
+  #if defined (USE_MPI)
+  unsigned long iproc = mpi_node_rank;
+  unsigned long nproc = mpi_node_count;
+  #else
+  unsigned long iproc = 0;
+  unsigned long nproc = 1;
+  #endif
+
+  if (iproc == 0)
+    mcpl_merge_outfiles_mpi (outfilename, nproc);
+  if (verbose) {
+    MPI_MASTER (printf ("\n\nMCPL output summary from %s\n", outfilename); mcpl_dump (outfilename, 0, 0, 10););
+  }
+  #ifdef OPENACC
+  destroy_darr1d (X);
+  destroy_darr1d (Y);
+  destroy_darr1d (Z);
+  destroy_darr1d (VX);
+  destroy_darr1d (VY);
+  destroy_darr1d (VZ);
+  destroy_darr1d (SX);
+  destroy_darr1d (SY);
+  destroy_darr1d (SZ);
+  destroy_darr1d (T);
+  destroy_darr1d (P);
+  if (U) free(U);
+  #endif
+  free (outfilename);
+
+    }
+%}
+
+MCDISPLAY
+%{
+%}
+
+END
