@@ -1,6 +1,5 @@
 import sys
 sys.path.append("../NF/")
-
 import torch
 import onnx
 from nf_definition import VelocityField
@@ -8,7 +7,7 @@ from nf_definition import VelocityField
 
 if __name__ == "__main__":
     device = "cpu"
-    ckpt = torch.load("../NF/flowModel.pth", map_location=device)
+    ckpt = torch.load("../NF/MVP_flowModel.pth", map_location=device)
     nf = VelocityField().to(device)
     nf.load_state_dict(ckpt["state_dict"])
     nf.eval()
@@ -16,6 +15,8 @@ if __name__ == "__main__":
     dummy_t = torch.randn(1, 1).to(device) 
     # Export ONNX with external weights
     onnx_path = "velocity_field.onnx"
+
+
 
     prog = torch.onnx.export(
         nf,
@@ -35,13 +36,18 @@ if __name__ == "__main__":
     # Convert to external data format (separate weights file)
     model = onnx.load(onnx_path)
 
+    meta1 = onnx.StringStringEntryProto()
+    meta1.key = "author"
+    meta1.value = "Daniel Lomholt Christensen"
+    
+    meta2 = onnx.StringStringEntryProto()
+    meta2.key = "n_training_samples"
+    meta2.value = str(1000000)
+    
+    model.metadata_props.extend([meta1, meta2])
     onnx.save_model(
         model,
-        onnx_path,
-        save_as_external_data=True,
-        all_tensors_to_one_file=True,
-        location="velocity_field_weights.bin",
-        size_threshold=1024,  # bytes threshold before moving tensors outside
+        "velocity_field_meta.onnx",
     )
 
     print("✅ Export complete!")
