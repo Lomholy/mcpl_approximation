@@ -131,7 +131,7 @@ add_arguments(parser)
 args = parser.parse_args()
 data = load_mcpl_file("../../data_files/ODIN.mcpl.gz", int(args.n_particles))
 data = torch.asarray(transform(data, file_path="../../data_files/preprocess/gaussian_transformer.bin"), dtype=torch.float32)
-# torch.save(torch.asarray(data), "../gaussian_input.pkl")
+
 dim = data.shape[1]
 device = args.device
 
