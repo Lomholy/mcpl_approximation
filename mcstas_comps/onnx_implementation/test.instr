@@ -59,16 +59,11 @@ COMPONENT Origin = Progress_bar()
   AT (0,0,0) ABSOLUTE
 
 COMPONENT src = Source_ML_CFM(
-    ML_filename="./velocity_field_meta.onnx",
-    transformer_filename = "../NF/gaussian_transformer.bin"
+    ML_filename="../../data_files/models/CFM.onnx",
+    transformer_filename = "../../data_files/preprocess/gaussian_transformer.bin",
+    batch_size = 100000
     )
 AT(0,0,0) ABSOLUTE
-COMPONENT mcpl = MCPL_output(
-  filename = "C_gen.mcpl.gz"
-
-)
-AT (0,0,0) RELATIVE PREVIOUS
-
 
 COMPONENT mon = PSD_monitor(
 xwidth = 0.1,

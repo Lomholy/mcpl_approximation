@@ -2,9 +2,10 @@
 import mcpl
 import numpy as np
 import torch
+from torch import nn
 import np2mcpl
 import math
-import h5py
+import onnx
 
 
 def load_mcpl_file(
@@ -272,3 +273,46 @@ def save_data_as_mcpl(data, filename):
     output[:, 9] = data[:, 0] # Weight
 
     np2mcpl.save(filename, output)
+
+
+
+def export_model_as_onnx(input_model: nn.Module, model_path, onnx_path):
+    device = "cpu"
+    ckpt = torch.load("../../data_files/models/CFM.pth", map_location=device)
+    model = input_model().to(device)
+    model.load_state_dict(ckpt["state_dict"])
+    model.eval()
+    dummy_input = torch.randn(1, 7).to(device) 
+    dummy_t = torch.randn(1, 1).to(device) 
+    # Export ONNX with external weights
+    prog = torch.onnx.export(
+        model,
+        (dummy_input, dummy_t),
+        external_data=True,
+        export_params=False,
+        opset_version=18,
+        input_names=["input"],
+        output_names=["output"],
+        dynamo=True,
+        dynamic_shapes={
+            "x": {0: "batch"},
+            "t": {0: "batch"},
+        }
+    )
+    prog.save(onnx_path, external_data=True)
+
+
+    # Make a metadata file 
+    model = onnx.load(onnx_path)
+    meta1 = onnx.StringStringEntryProto()
+    meta1.key = "author"
+    meta1.value = "Daniel Lomholt Christensen"
+    meta2 = onnx.StringStringEntryProto()
+    meta2.key = "n_training_samples"
+    meta2.value = str(1000000)
+    model.metadata_props.extend([meta1, meta2])
+    onnx.save_model(
+        model,
+        onnx_path,
+    )
+    print("✅ Export complete!")

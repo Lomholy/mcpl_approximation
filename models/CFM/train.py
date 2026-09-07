@@ -3,12 +3,13 @@ import os
 from model import VelocityField, sample_t
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 sys.path.append("../../utils/")
-from data_load import load_mcpl_file, transform
+from data_load import load_mcpl_file, transform, export_model_as_onnx
 import argparse
 from tqdm import tqdm
 import torch
 import numpy as np
 import copy
+import onnx
 
 # ==============================================================================
 # ARGUMENT PARSING
@@ -141,4 +142,4 @@ losses, val_losses = train(model, data, args.model_filename)
 
 np.save("../../data_files/losses/cfm_train.npy", np.array(losses))
 np.save("../../data_files/losses/cfm_val.npy", np.array(val_losses))
-
+export_model_as_onnx(VelocityField, "../../data_files/models/CFM.pth", "../../data_files/models/CFM.onnx")

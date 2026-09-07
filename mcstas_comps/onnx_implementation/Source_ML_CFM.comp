@@ -36,7 +36,7 @@ SETTING PARAMETERS (string ML_filename="",
                    )
 
 
-DEPENDENCY "@MCPLFLAGS@"
+DEPENDENCY "@MCPLFLAGS@ -I$CONDA_PREFIX/include -L$CONDA_PREFIX/lib -lonnxruntime -Wl,-rpath,$CONDA_PREFIX/lib"
 
 
 SHARE
@@ -220,6 +220,7 @@ INITIALIZE
 
     // Create session options
     CHECK(api->CreateSessionOptions(&session_options));
+    CHECK(api->SessionOptionsAppendExecutionProvider(session_options, "CoreML", "", "", 0));
     // CHECK(api->SetSessionLogSeverityLevel(session_options, 0));
     // Optional: set number of threads. 0 means auto
     CHECK(api->SetIntraOpNumThreads(session_options, 0));
