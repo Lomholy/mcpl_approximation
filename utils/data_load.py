@@ -17,8 +17,10 @@ def load_mcpl_file(
         print(f"load_mcpl_file: Loading all {max_p} neutrons in mcpl file")
         n_particles = max_p
     if max_p < n_particles:
-        print(f"load_mcpl_file: Warning! Requested {n_particles} neutrons," 
-              + f" but there were only {max_p} neutrons available." )
+        print(
+            f"load_mcpl_file: Warning! Requested {n_particles} neutrons,"
+            + f" but there were only {max_p} neutrons available."
+        )
         print(f"Loading {max_p} neutrons.")
         n_particles = max_p
 
@@ -128,9 +130,10 @@ def normal_cdf_np(z):
     z = torch.as_tensor(z, dtype=torch.float64)
     return (0.5 * (1.0 + torch.erf(z / SQRT2))).numpy()
 
-def get_transformer_limits(file_path = "gaussian_transformer.bin" ):
+
+def get_transformer_limits(file_path="gaussian_transformer.bin"):
     grid, sorted_cols = load_transform_binary(file_path)
-    lims = (sorted_cols[:,0], sorted_cols[:,-1])
+    lims = (sorted_cols[:, 0], sorted_cols[:, -1])
 
     return lims, grid, sorted_cols
 
@@ -182,6 +185,7 @@ def inverse_transform(data, file_path="gaussian_transformer.bin"):
 
     return output
 
+
 # ==============================================================================
 # ==============================================================================
 # ==============================================================================
@@ -200,8 +204,8 @@ def preprocess_nn(data):
     data = dim_reduction(data)
     mins = np.zeros((data.shape[1]))
     dxs = np.zeros((data.shape[1]))
-    data[:, 0] = torch.log(data[:, 0]*1e20 + 1)  # weight
-    data[:, 1] = torch.log(data[:, 1]*1e10 + 1)  # energy
+    data[:, 0] = torch.log(data[:, 0] * 1e20 + 1)  # weight
+    data[:, 1] = torch.log(data[:, 1] * 1e10 + 1)  # energy
     for i in range(data.shape[1]):
         data[:, i], mins[i], dxs[i] = normalize(data[:, i])
     return data, mins, dxs
@@ -245,8 +249,8 @@ def postprocess_nn(data, mins=None, dxs=None, filename=""):
     for i in range(data.shape[1]):
         data[:, i] = inverse_norm(data[:, i], mins[i], dxs[i])
     output = torch.zeros((data.shape[0], 7))
-    output[:, 0] = (np.exp(data[:, 0]) - 1)/1e20
-    output[:, 1] = (np.exp(data[:, 1]) - 1)/1e10
+    output[:, 0] = (np.exp(data[:, 0]) - 1) / 1e20
+    output[:, 1] = (np.exp(data[:, 1]) - 1) / 1e10
 
     output[:, 2] = np.cos(data[:, 3]) * np.sin(data[:, 2])
     output[:, 3] = np.sin(data[:, 3]) * np.sin(data[:, 2])
@@ -268,41 +272,34 @@ def save_data_as_mcpl(data, filename):
     output[:, 5] = data[:, 3]
     output[:, 6] = data[:, 4]
 
-    output[:, 7] = 1 # Time is irrelevant here
-    output[:, 8] = data[:, 1] # Energy
-    output[:, 9] = data[:, 0] # Weight
+    output[:, 7] = 1  # Time is irrelevant here
+    output[:, 8] = data[:, 1]  # Energy
+    output[:, 9] = data[:, 0]  # Weight
 
     np2mcpl.save(filename, output)
 
 
-
-def export_model_as_onnx(input_model: nn.Module, model_path, onnx_path):
-    device = "cpu"
-    ckpt = torch.load("../../data_files/models/CFM.pth", map_location=device)
-    model = input_model().to(device)
-    model.load_state_dict(ckpt["state_dict"])
-    model.eval()
-    dummy_input = torch.randn(1, 7).to(device) 
-    dummy_t = torch.randn(1, 1).to(device) 
+def export_model_as_onnx(input_model: nn.Module, onnx_path: str, device: str):
+    input_model = input_model.to(device)
+    input_model.eval()
+    dummy_input = torch.randn(10000, 7).to(device)
     # Export ONNX with external weights
     prog = torch.onnx.export(
-        model,
-        (dummy_input, dummy_t),
-        external_data=True,
-        export_params=False,
+        input_model,
+        dummy_input,
+        external_data=False,
+        export_params=True,
         opset_version=18,
         input_names=["input"],
         output_names=["output"],
         dynamo=True,
         dynamic_shapes={
             "x": {0: "batch"},
-            "t": {0: "batch"},
-        }
+        },
     )
     prog.save(onnx_path, external_data=True)
 
-
-    # Make a metadata file 
+    # Make a metadata file
     model = onnx.load(onnx_path)
     meta1 = onnx.StringStringEntryProto()
     meta1.key = "author"
