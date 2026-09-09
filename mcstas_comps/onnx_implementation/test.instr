@@ -58,10 +58,9 @@ TRACE
 COMPONENT Origin = Progress_bar()
   AT (0,0,0) ABSOLUTE
 
-COMPONENT src = Source_ML_CFM(
-    ML_filename="../../data_files/models/CFM.onnx",
-    transformer_filename = "../../data_files/preprocess/gaussian_transformer.bin",
-    batch_size = 100000
+COMPONENT src = Source_ML(
+    ML_filename="../../data_files/models/CFM_sampler.onnx",
+    transformer_filename = "../../data_files/preprocess/gaussian_transformer.bin"
     )
 AT(0,0,0) ABSOLUTE
 
