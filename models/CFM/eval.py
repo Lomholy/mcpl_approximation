@@ -1,12 +1,11 @@
 import sys
 sys.path.append("../../utils/")
-from data_load import inverse_transform, get_transformer_limits
+from data_load import inverse_transform, get_transformer_limits, export_model_as_onnx
 from plotting import plot_correlations_7d
-from model import VelocityField
+from model import VelocityField, Sampler
 import torch
 import matplotlib.pyplot as plt
 import argparse
-import numpy as np
 from tqdm import tqdm
 import time
 
@@ -35,9 +34,9 @@ device = "mps"
 
 ckpt = torch.load("../../data_files/models/CFM.pth", map_location=device)
 
-nf = VelocityField().to(device)
-nf.load_state_dict(ckpt["state_dict"])
-nf.eval()
+model = VelocityField().to(device)
+model.load_state_dict(ckpt["state_dict"])
+model.eval()
 
 lims, grid, cols = get_transformer_limits(file_path="../../data_files/preprocess/gaussian_transformer.bin")
 
@@ -47,18 +46,24 @@ maxs = torch.asarray(lims[1], dtype=torch.float32, device="cpu")
 
 samples = []
 gaussian_samples = []
-start = time.time()
+sampler = Sampler(model, device=device)
 while len(samples) < n_samples:
+    start = time.time()
     print(len(samples))
     # Limit samples to within the preprocessed data limits
-    batch = sample_flow(nf, batch_size).cpu()
+    x = torch.randn(batch_size, 7, device=device)
+    batch = sampler.forward(x).cpu().detach().numpy()
     gaussian_batch = batch
     batch = torch.asarray(inverse_transform(batch, file_path="../../data_files/preprocess/gaussian_transformer.bin"))
     mask = (batch >= mins) & (batch <= maxs)
     batch = batch[mask.all(axis=1)]
     gaussian_samples = gaussian_samples + gaussian_batch[mask.all(axis=1)].tolist()
     samples = samples + batch.tolist()
-    print(f"Time passed = {time.time() - start}")
+    print(f"Iteration time = {time.time() - start}")
+print(next(sampler.parameters()).dtype)
+export_model_as_onnx(sampler, "../../data_files/models/CFM_sampler.onnx", device)
+
+
 samples = samples[:n_samples]
 gaussian_samples = gaussian_samples[:n_samples]
 samples = torch.asarray(samples)

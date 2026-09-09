@@ -1,6 +1,6 @@
 import sys
 import os
-from model import VelocityField, sample_t
+from model import VelocityField
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 sys.path.append("../../utils/")
 from data_load import load_mcpl_file, transform, export_model_as_onnx
@@ -9,7 +9,6 @@ from tqdm import tqdm
 import torch
 import numpy as np
 import copy
-import onnx
 
 # ==============================================================================
 # ARGUMENT PARSING
@@ -51,6 +50,24 @@ def flow_matching_loss(model, x0, x1, t):
 
     return loss
 
+# ---------------------------------------------------------
+#   Sample Time
+# ---------------------------------------------------------
+
+def sample_t(batch_size, device):
+    mode = torch.rand(batch_size, 1, device=device)
+
+    t_uniform = torch.rand(batch_size, 1, device=device)
+    t_near_1 = 1.0 - torch.rand(batch_size, 1, device=device).pow(2)
+    t_near_0 = torch.rand(batch_size, 1, device=device).pow(2)
+
+    t = torch.where(
+        mode < 0.70,
+        t_uniform,
+        torch.where(mode < 0.90, t_near_1, t_near_0),
+    )
+
+    return t
 
 # ---------------------------------------------------------
 #  Training loop
@@ -142,4 +159,4 @@ losses, val_losses = train(model, data, args.model_filename)
 
 np.save("../../data_files/losses/cfm_train.npy", np.array(losses))
 np.save("../../data_files/losses/cfm_val.npy", np.array(val_losses))
-export_model_as_onnx(VelocityField, "../../data_files/models/CFM.pth", "../../data_files/models/CFM.onnx")
+export_model_as_onnx(VelocityField, "../../data_files/models/CFM.onnx", device)

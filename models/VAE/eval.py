@@ -1,13 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from vae_definition import VAE
+from model import VAE
 import torch
 import argparse
 import sys
 
-sys.path.append("..")
+sys.path.append("../../utils/")
 from plotting import plot_correlations_7d
-from data_load import save_data_as_mcpl
 
 
 # ==============================================================================
@@ -41,14 +40,15 @@ def plot_losses(
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--correlations_file", type=str, default="vae_best.pth")
+parser.add_argument("--correlations_file", type=str, default="../../data_files/models/vae.pth")
+parser.add_argument("--device", type=str, default="mps")
 parser.add_argument("--plot", action="store_true")
 parser.add_argument("--loss", action="store_true")
 args = parser.parse_args()
 filename = args.correlations_file
+plot = args.plot
+device = args.device
 
-
-device = "mps"
 
 ckpt = torch.load(filename, map_location=device)
 
@@ -68,11 +68,11 @@ with torch.no_grad():
     samples = samples[:n_samples]
     samples = torch.asarray(samples)
 
+if plot:
+    plot_losses(filename_train="../../data_files/losses/vae_train.npy", filename_val="../../data_files/losses/vae_val.npy")
+    plot_correlations_7d(samples, "Synthetic VAE: correlations postprocessed")
 
-plot_losses()
-plot_correlations_7d(samples, "Synthetic VAE: correlations postprocessed")
-
-torch.save(samples, "gaussian_output.pkl")
+torch.save(samples, "../../data_files/VAE_gauss.pkl")
 # save_data_as_mcpl(samples, "../vae_samples")
 
 
