@@ -30,7 +30,7 @@
 *
 * %End
 *******************************************************************************/
-DEFINE INSTRUMENT template()
+DEFINE INSTRUMENT Test_Source_ML(string model_filename = "../../data_files/models/CFM_sampler.onnx")
 
 /* The DECLARE section allows us to declare variables or  small      */
 /* functions in C syntax. These may be used in the whole instrument. */
@@ -59,7 +59,7 @@ COMPONENT Origin = Progress_bar()
   AT (0,0,0) ABSOLUTE
 
 COMPONENT src = Source_ML(
-    ML_filename="../../data_files/models/CFM_sampler.onnx",
+    ML_filename=model_filename,
     transformer_filename = "../../data_files/preprocess/gaussian_transformer.bin"
     )
 AT(0,0,0) ABSOLUTE
