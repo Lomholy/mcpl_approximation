@@ -10,7 +10,7 @@ import numpy as np
 import sys
 
 sys.path.append("../../utils/")
-from data_load import load_mcpl_file, transform, export_model_as_onnx
+from data_load import load_mcpl_file, transform, export_model_as_onnx, export_model_as_torchscript
 
 # ==============================================================================
 # ===================== ARGUMENT PARSING ==================================
@@ -158,7 +158,7 @@ if __name__ == "__main__":
 
     batch_size = 1024
     kl_weight = 0.6
-    epochs = 100
+    epochs = 2
 
     data = load_mcpl_file("../../data_files/ODIN.mcpl.gz", n_particles)
     data = torch.asarray(transform(data, file_path="../../data_files/preprocess/gaussian_transformer.bin"), dtype=torch.float32)
@@ -179,4 +179,5 @@ if __name__ == "__main__":
     np.save("../../data_files/losses/vae_train.npy", train_losses)
     np.save("../../data_files/losses/vae_val.npy", val_losses)
     export_model_as_onnx(vae, "../../data_files/models/VAE.onnx", device="mps")
+    export_model_as_torchscript(vae, "../../data_files/models/VAE_torch.pt", device="mps")
 

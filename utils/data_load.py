@@ -313,3 +313,10 @@ def export_model_as_onnx(input_model: nn.Module, onnx_path: str, device: str):
         onnx_path,
     )
     print("✅ Export complete!")
+
+
+def export_model_as_torchscript(input_model: nn.Module, torch_path: str, device: str):
+    input_model.eval()
+    example_data = torch.rand((7, 10000)).to(device)
+    traced_script_module = torch.jit.script(input_model, example_data)
+    traced_script_module.save(torch_path)
