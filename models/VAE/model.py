@@ -16,7 +16,7 @@ class ResBlock(nn.Module):
 
 
 class VAE(nn.Module):
-    def __init__(self, input_dim=7, latent_dim=10, width=256, dec_width=256, depth=5):
+    def __init__(self, input_dim=12, latent_dim=10, width=256, dec_width=256, depth=5):
         super().__init__()
         self.lat_dim = latent_dim
 

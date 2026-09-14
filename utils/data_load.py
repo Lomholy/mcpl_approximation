@@ -24,7 +24,7 @@ def load_mcpl_file(
         print(f"Loading {max_p} neutrons.")
         n_particles = max_p
 
-    data = np.zeros([n_particles, 7], dtype=np.float32)
+    data = np.zeros([n_particles, 12], dtype=np.float32)
 
     for i, p in enumerate(mcplfile.particles):
         if i < offset:
@@ -34,11 +34,14 @@ def load_mcpl_file(
         j = i - offset
         data[j : (j + 1), 0] = np.asarray(p.weight)
         data[j : (j + 1), 1] = np.asarray(p.ekin)
-        data[j : (j + 1), 2:5] = np.asarray([p.ux, p.uy, p.uz]).T
-        data[j : (j + 1), 5:] = np.asarray([p.x, p.y]).T
+        data[j : (j + 1), 2] = np.asarray(p.time)
+        data[j : (j + 1), 3:6] = np.asarray([p.ux, p.uy, p.uz]).T
+        data[j : (j + 1), 6:9] = np.asarray([p.x, p.y, p.z]).T
+        data[j : (j + 1), 9:12] = np.asarray([p.polx, p.poly, p.polz]).T
         if j >= n_particles + offset:
             break
-    return torch.tensor(data, dtype=torch.float32)
+    data = torch.tensor(data, dtype=torch.float32)
+    return data
 
 
 def dim_reduction(data):
@@ -165,6 +168,8 @@ def transform(data, jitter=1e-12, file_path="gaussian_transformer.bin"):
         output[:, j] = normal_icdf_np(u).astype(np.float32)
         sorted_cols.append(np.sort(col).astype(np.float32))
     save_transform_binary(file_path, grid, sorted_cols)
+    output = torch.asarray(output)
+    torch.save(output, "../../data_files/samples/gaussian_input.pkl")
     return output
 
 
@@ -280,9 +285,9 @@ def save_data_as_mcpl(data, filename):
 
 
 def export_model_as_onnx(input_model: nn.Module, onnx_path: str, device: str):
-    input_model = input_model.to(device)
+    input_model = input_model.to(device=device)
     input_model.eval()
-    dummy_input = torch.randn(10000, 7).to(device)
+    dummy_input = torch.randn(10000, 12).to(device)
     # Export ONNX with external weights
     prog = torch.onnx.export(
         input_model,
@@ -317,6 +322,6 @@ def export_model_as_onnx(input_model: nn.Module, onnx_path: str, device: str):
 
 def export_model_as_torchscript(input_model: nn.Module, torch_path: str, device: str):
     input_model.eval()
-    example_data = torch.rand((7, 10000)).to(device)
+    example_data = torch.rand((12, 10000)).to(device)
     traced_script_module = torch.jit.script(input_model, example_data)
     traced_script_module.save(torch_path)

@@ -72,8 +72,7 @@ if plot:
     plot_losses(filename_train="../../data_files/losses/vae_train.npy", filename_val="../../data_files/losses/vae_val.npy")
     plot_correlations_7d(samples, "Synthetic VAE: correlations postprocessed")
 
-torch.save(samples, "../../data_files/VAE_gauss.pkl")
-# save_data_as_mcpl(samples, "../vae_samples")
+torch.save(samples, "../../data_files/samples/VAE_gauss.pkl")
 
 
 plt.show()

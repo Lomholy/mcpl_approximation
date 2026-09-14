@@ -158,9 +158,9 @@ if __name__ == "__main__":
 
     batch_size = 1024
     kl_weight = 0.6
-    epochs = 2
+    epochs = 100
 
-    data = load_mcpl_file("../../data_files/ODIN.mcpl.gz", n_particles)
+    data = load_mcpl_file("../../data_files/mcpl_files/ODIN.mcpl.gz", n_particles)
     data = torch.asarray(transform(data, file_path="../../data_files/preprocess/gaussian_transformer.bin"), dtype=torch.float32)
 
     dataset = TensorDataset(data)

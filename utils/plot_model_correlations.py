@@ -14,16 +14,18 @@ odin = "./ODIN.mcpl.gz"
 c_gen = "./C_gen.mcpl.gz"
 
 n_samples = 1_000_000
-cfm = load_mcpl_file(cfm, n_samples)
-c_gen = load_mcpl_file(c_gen, n_samples)
+# cfm = load_mcpl_file(cfm, n_samples)
+# c_gen = load_mcpl_file(c_gen, n_samples)
 
-# gauss_cfm = torch.load("./mvp_gaussian_output.pkl")
-gauss_vae = torch.load("VAE/gaussian_output.pkl")
+gauss_cfm = torch.load("../data_files/samples/CFM_gauss.pkl")
+gauss_vae = torch.load("../data_files/samples/VAE_gauss.pkl")
 # kde = load_mcpl_file(kde, n_samples)
 # odin = load_mcpl_file(odin, n_samples)
-gauss_odin = torch.load("./gaussian_input.pkl")
-print(gauss_odin.shape, gauss_vae.shape)
+gauss_odin = torch.load("../data_files/samples/gaussian_input.pkl")
 
+
+print(gauss_cfm[:100])
+print(gauss_odin[:100])
 
 # plot_correlations_7d(cfm, "CFM correlations", filename="cfm_corr.png")
 # plot_correlations_7d(vae, "VAE correlations", filename="vae_corr.png")
@@ -31,8 +33,8 @@ print(gauss_odin.shape, gauss_vae.shape)
 # plot_correlations_7d(odin, "Simulation correlations", filename="sim_corr.png")
 
 # plot_two_datasets(odin, cfm, title="Input vs CFM", filename="MVP ODIN_CFM_comparison.png")
-# plot_two_datasets(gauss_odin, gauss_cfm, title="Input vs CFM in Gaussian space", filename="MVP ODIN_CFM_gauss_comparison.png")
-# plot_two_datasets(gauss_odin, gauss_cfm, title="Input vs CFM in Gaussian space",)
+# plot_two_datasets(gauss_odin, gauss_cfm, title="Input vs CFM in Gaussian space", filename="ODIN_CFM_gauss_comparison.png")
+plot_two_datasets(gauss_odin, gauss_cfm, title="Input vs CFM in Gaussian space",)
 plot_two_datasets(gauss_odin, gauss_vae, title="Input vs VAE in Gaussian space",)
 
 

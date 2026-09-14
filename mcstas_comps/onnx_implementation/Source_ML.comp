@@ -275,7 +275,7 @@ INITIALIZE
     // =========================== PREPARE SAMPLING ===========================
     // ========================================================================
 
-    dim = 7;
+    dim = 12;
 
     // Create memory info (CPU)
     CHECK(api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memory_info));
@@ -347,13 +347,16 @@ TRACE
 
   p       = output_data[base + 0]*weight_norm;
   tot_vel = SE2V * sqrt(output_data[base + 1]*1e9);
-  x       = output_data[base + 5]/100;
-  y       = output_data[base + 6]/100;
-  z       = 0;
-  vx      = output_data[base + 2] * tot_vel;
-  vy      = output_data[base + 3] * tot_vel;
-  vz      = output_data[base + 4] * tot_vel;
-  t       = 0;
+  t       = output_data[base + 2] * 1e-3;
+  vx      = output_data[base + 3] * tot_vel;
+  vy      = output_data[base + 4] * tot_vel;
+  vz      = output_data[base + 5] * tot_vel;
+  x       = output_data[base + 6]/100;
+  y       = output_data[base + 7]/100;
+  z       = output_data[base + 8]/100;
+  sx      = output_data[base + 9];
+  sy      = output_data[base + 10];
+  sz      = output_data[base + 11];
 
   local_id++;
 

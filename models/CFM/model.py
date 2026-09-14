@@ -27,7 +27,7 @@ class ResBlock(nn.Module):
 class VelocityField(nn.Module):
     def __init__(
         self,
-        input_dim=7,
+        input_dim=12,
         width=64,
         depth=3,
         time_dim=28,

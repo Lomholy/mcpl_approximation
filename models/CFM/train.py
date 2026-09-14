@@ -147,7 +147,7 @@ def train(
 parser = argparse.ArgumentParser()
 add_arguments(parser)
 args = parser.parse_args()
-data = load_mcpl_file("../../data_files/ODIN.mcpl.gz", int(args.n_particles))
+data = load_mcpl_file("../../data_files/mcpl_files/ODIN.mcpl.gz", int(args.n_particles))
 data = torch.asarray(transform(data, file_path="../../data_files/preprocess/gaussian_transformer.bin"), dtype=torch.float32)
 
 dim = data.shape[1]
@@ -159,4 +159,3 @@ losses, val_losses = train(model, data, args.model_filename)
 
 np.save("../../data_files/losses/cfm_train.npy", np.array(losses))
 np.save("../../data_files/losses/cfm_val.npy", np.array(val_losses))
-export_model_as_onnx(VelocityField, "../../data_files/models/CFM.onnx", device)
