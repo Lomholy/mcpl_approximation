@@ -19,6 +19,7 @@ def add_arguments(parser):
     parser.add_argument("--n_particles", default=1e6)
     parser.add_argument("--model_filename", default="../../data_files/models/CFM.pth")
     parser.add_argument("--device", default="mps")
+    parser.add_argument("--input_mcpl", type=str, default= "../../data_files/mcpl_files/ODIN.mcpl.gz")
 
 
 # ---------------------------------------------------------
@@ -147,7 +148,9 @@ def train(
 parser = argparse.ArgumentParser()
 add_arguments(parser)
 args = parser.parse_args()
-data = load_mcpl_file("../../data_files/mcpl_files/ODIN.mcpl.gz", int(args.n_particles))
+input_mcpl = args.input_mcpl
+
+data = load_mcpl_file(input_mcpl, int(args.n_particles))
 data = torch.asarray(transform(data, file_path="../../data_files/preprocess/gaussian_transformer.bin"), dtype=torch.float32)
 
 dim = data.shape[1]
