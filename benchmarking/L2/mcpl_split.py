@@ -32,12 +32,10 @@ def split_mcpl_file(mcpl_file, requested_sizes, filename, original_data=None):
 
 
 if __name__ == "__main__":
-
     requested_sizes = np.geomspace(100, 25_416_962, 70, dtype=int)
     original_data = load_mcpl_file("../ODIN.mcpl.gz").numpy()
     split_mcpl_file("../ODIN.mcpl.gz", requested_sizes, "./mcpl_files/input")
     split_mcpl_file("../ODIN_n11.mcpl.gz", requested_sizes, "./mcpl_files/big")
-    split_mcpl_file("../cmf_samples.mcpl.gz", requested_sizes, "./mcpl_files/cfm", original_data)
 
 
 

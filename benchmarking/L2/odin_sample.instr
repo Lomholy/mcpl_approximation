@@ -38,7 +38,8 @@ double jitter_bp2 = 0,
 double t0_phase_offset = 0, 
 double jit_t0_sec = 0, 
 int n_repeats = 1, 
-string run_from_mcpl = "mcpl_files/big_1496.mcpl.gz" 
+string run_from_mcpl = "mcpl_files/big_1496.mcpl.gz",
+string run_ml = ""
 )
 
 DECLARE 
@@ -59,9 +60,17 @@ t0_phase = t0_phase_offset;
 %}
 
 TRACE 
+
 COMPONENT MCPL_optical_axis_backend = MCPL_input(
- filename = run_from_mcpl, repeat_count = n_repeats)
+ filename = run_from_mcpl, repeat_count = n_repeats) WHEN (strcmp(run_ml, "") == 0)
 AT (0,      0,      0) ABSOLUTE
+
+COMPONENT ml_src = Source_ML(
+    ML_filename = run_ml,
+    verbose=0
+) WHEN (strcmp(run_ml, "") != 0)
+AT (0,0,0) ABSOLUTE
+
 
 COMPONENT optical_axis_backend = Arm()
 AT (0,      0,      0) ABSOLUTE
