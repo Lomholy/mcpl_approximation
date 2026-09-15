@@ -234,7 +234,9 @@ INITIALIZE
         values,
         1
     ));
-    CHECK(api->SetSessionLogSeverityLevel(session_options, 0));
+    if (verbose){
+      CHECK(api->SetSessionLogSeverityLevel(session_options, 0));
+    }
     // Optional: set number of threads. 0 means auto
     CHECK(api->SetIntraOpNumThreads(session_options, 0));
     CHECK(api->SetInterOpNumThreads(session_options, 0));
