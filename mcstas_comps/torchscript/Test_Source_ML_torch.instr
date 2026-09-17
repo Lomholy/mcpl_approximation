@@ -1,0 +1,61 @@
+/*******************************************************************************
+*         McStas instrument definition URL=http://www.mcstas.org
+*
+* Instrument: Test_Source_ML_torch
+*
+* %Identification
+* Written by: Daniel Lomholt Christensen
+* Date: September 2026
+* Origin: NBI@UCPH funded by ACTNXT
+* %INSTRUMENT_SITE: Templates
+*
+* Smoke test for Source_ML_torch, the TorchScript counterpart of
+* ../onnx_implementation/Source_ML.comp / test.instr.
+*
+* %D
+* Defaults point at the untrained smoke-test artifacts produced by
+* torch_test.py (CFM_sampler.pt) and a synthetic gaussian_transformer_smoke.bin
+* in this directory, not a trained model - this only exercises the
+* load/run/inverse-transform/emit pipeline.
+*
+* Example: mcrun Test_Source_ML_torch.instr
+*
+* %P
+*
+* %Link
+*
+* %End
+*******************************************************************************/
+DEFINE INSTRUMENT Test_Source_ML_torch(
+    string model_filename = "CFM_sampler.pt",
+    string transformer_filename = "gaussian_transformer_smoke.bin")
+
+DECLARE
+%{
+%}
+
+INITIALIZE
+%{
+%}
+
+TRACE
+
+COMPONENT Origin = Progress_bar()
+  AT (0,0,0) ABSOLUTE
+
+COMPONENT src = Source_ML_torch(
+    ML_filename=model_filename,
+    transformer_filename = transformer_filename
+    )
+AT(0,0,0) ABSOLUTE
+
+COMPONENT mon = PSD_monitor(
+xwidth = 0.1,
+yheight = 0.1
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+FINALLY
+%{
+%}
+END
