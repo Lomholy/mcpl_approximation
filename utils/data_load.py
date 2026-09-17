@@ -320,8 +320,20 @@ def export_model_as_onnx(input_model: nn.Module, onnx_path: str, device: str):
     print("✅ Export complete!")
 
 
-def export_model_as_torchscript(input_model: nn.Module, torch_path: str, device: str):
+def export_model_as_torchscript(
+    input_model: nn.Module,
+    torch_path: str,
+    device: str,
+    n_training_samples: int = 1_000_000,
+):
+    input_model = input_model.to(device=device)
     input_model.eval()
-    example_data = torch.rand((12, 10000)).to(device)
-    traced_script_module = torch.jit.script(input_model, example_data)
-    traced_script_module.save(torch_path)
+    scripted_module = torch.jit.script(input_model)
+    # TorchScript's analog of ONNX's model.metadata_props: named byte blobs
+    # embedded in the file, read back via torch::jit::load(path, device, extra_files).
+    torch.jit.save(
+        scripted_module,
+        torch_path,
+        _extra_files={"n_training_samples": str(n_training_samples)},
+    )
+    print("✅ Export complete!")

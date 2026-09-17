@@ -1,0 +1,294 @@
+/*******************************************************************************
+*
+* McStas, neutron ray-tracing package
+*         Copyright 1997-2026, All rights reserved
+*         Risoe National Laboratory, Roskilde, Denmark
+*         Institut Laue Langevin, Grenoble, France
+*
+* Component: Source_ML_torch
+*
+* %I
+* Written by: Daniel Lomholt Christensen
+* Date: September 2026
+* Origin: NBI@UCPH funded by ACTNXT
+*
+* TorchScript counterpart of ../onnx_implementation/Source_ML.comp: a source
+* that samples from a machine learning model (Type Conditional Flow Matching),
+* using a LibTorch-backed C wrapper (torch_wrap.h) instead of ONNX Runtime,
+* since LibTorch's own API is C++-only and McStas compiles this file as C.
+*
+* %D
+* This component
+*
+* Example: Source_simple(radius=0.1, dist=2, focus_xw=.1, focus_yh=.1, E0=14, dE=2)
+*
+* %P
+* ML_filename: [str]           Path to a TorchScript module exported by
+*                               utils/data_load.py:export_model_as_torchscript
+* transformer_filename: [str]  Path to the inverse Gaussian-rank transform
+*                               binary produced by utils/data_load.py:save_transform_binary
+* batch_size: [1]               Number of neutrons sampled per model call
+* verbose: [1]                  Print progress/timing information
+*
+* %E
+*******************************************************************************/
+
+DEFINE COMPONENT Source_ML_torch
+
+SETTING PARAMETERS (string ML_filename="",
+                    string transformer_filename = "",
+                    int batch_size = 10000,
+                    verbose=1
+                   )
+
+/* torchwrap (and the LibTorch it links) are expected installed into the
+ * active environment (e.g. via `cmake --install` into $CONDA_PREFIX), exactly
+ * like onnxruntime is for Source_ML.comp. Note: mcrun does NOT shell-expand
+ * DEPENDENCY strings (they are passed straight into the compiler's argv), so
+ * a literal "$CONDA_PREFIX/lib" here would not resolve -- unlike
+ * ../onnx_implementation/Source_ML.comp's DEPENDENCY, this intentionally
+ * does not try to; mcstas's own conda-aware CFLAGS already carry
+ * -I${CONDA_PREFIX}/include / -L${CONDA_PREFIX}/lib / -Wl,-rpath,${CONDA_PREFIX}/lib
+ * (see mccode_config.json), so naming the library is all that's needed. */
+DEPENDENCY "-ltorchwrap"
+
+
+SHARE
+%{
+
+  #include <stdio.h>
+  #include "torch_wrap.h"
+
+  #include <stdlib.h>
+  #include <math.h>
+  #include <sys/stat.h>
+
+  // Functions for Gauss rank scaling
+  #define SQRT2 1.4142135623730951
+
+  #include <time.h>
+
+double walltime()
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + 1e-9 * ts.tv_nsec;
+}
+
+// --------------------------------------------------
+// Load binary transform
+// --------------------------------------------------
+void load_transform_binary(char* path,
+                           int* n, int* d,
+                           double** grid,
+                           double** sorted_cols)
+{
+    FILE* f = fopen(path, "rb");
+    if (!f) {
+        perror("fopen");
+        exit(1);
+    }
+
+    fread(n, sizeof(int), 1, f);
+    fread(d, sizeof(int), 1, f);
+
+    *grid = malloc((*n) * sizeof(double));
+    *sorted_cols = malloc((*n) * (*d) * sizeof(double));
+
+    fread(*grid, sizeof(double), *n, f);
+    fread(*sorted_cols, sizeof(double), (*n) * (*d), f);
+
+    fclose(f);
+}
+
+// --------------------------------------------------
+// Normal CDF (matches your Python version)
+// --------------------------------------------------
+double normal_cdf(double z)
+{
+    return 0.5 * (1.0 + erf(z / SQRT2));
+}
+
+// --------------------------------------------------
+// Linear interpolation (np.interp equivalent)
+// --------------------------------------------------
+double interp(double x, const double* xs, const double* ys, int n)
+{
+    int lo = 0;
+    int hi = n - 1;
+
+    // binary search
+    while (hi - lo > 1) {
+        int mid = (lo + hi) / 2;
+        if (xs[mid] > x)
+            hi = mid;
+        else
+            lo = mid;
+    }
+
+    double t = (x - xs[lo]) / (xs[hi] - xs[lo]);
+    return ys[lo] + t * (ys[hi] - ys[lo]);
+}
+
+// --------------------------------------------------
+// Clamp helper
+// --------------------------------------------------
+double clamp(double x, double lo, double hi)
+{
+    if (x < lo) return lo;
+    if (x > hi) return hi;
+    return x;
+}
+
+// --------------------------------------------------
+// Inverse transform
+// data:    input (n × d) [row-major]
+// output:  output (n × d) [row-major]
+// --------------------------------------------------
+void inverse_transform(const float* data,
+                       float* output,
+                       int n, int d,
+                       char* file_path)
+{
+    int n_file, d_file;
+    double* grid;
+    double* sorted_cols;
+
+    load_transform_binary(file_path, &n_file, &d_file,
+                          &grid, &sorted_cols);
+
+    double lo = grid[0];
+    double hi = grid[n_file - 1];
+
+    for (int j = 0; j < d; j++) {
+        const double* col = &sorted_cols[j * n_file];
+
+        for (int i = 0; i < n; i++) {
+            double z = data[i * d + j];
+
+            // u = normal_cdf(z)
+            double u = normal_cdf(z);
+
+            // clamp
+            u = clamp(u, lo, hi);
+
+            // interpolate
+            output[i * d + j] = (float)interp(u, grid, col, n_file);
+        }
+    }
+
+    free(grid);
+    free(sorted_cols);
+}
+
+  %}
+/* Neutron parameters: (x,y,z,vx,vy,vz,t,sx,sy,sz,p) */
+DECLARE
+%{
+  int local_id;
+  int idx;
+  int base;
+  int dim;
+  double weight_norm;
+  long n_training_samples;
+
+  TorchModelHandle* model;
+
+  float* xt;
+  float* output;
+%}
+INITIALIZE
+%{
+    local_id = 0;
+    dim = 12;
+
+    // ========================================================================
+    // =========================== LOAD MODEL =================================
+    // ========================================================================
+    model = torch_load_model(ML_filename, &n_training_samples);
+    if (model == NULL) {
+        fprintf(stderr, "Source_ML_torch: failed to load model '%s'\n", ML_filename);
+        exit(1);
+    }
+    if (verbose) printf("Model loaded successfully!\n");
+
+    if (n_training_samples > 0) {
+        printf("Number of neutrons trained on: %ld\n", n_training_samples);
+    } else if (verbose) {
+        printf("No n_training_samples metadata found in model; disabling weight renormalization.\n");
+    }
+
+    // ========================================================================
+    // =========================== PREPARE SAMPLING ===========================
+    // ========================================================================
+    xt     = (float*) malloc(batch_size * dim * sizeof(float));
+    output = (float*) malloc(batch_size * dim * sizeof(float));
+
+    if (verbose) printf("Arrays allocated successfully. INITIALIZE finished!\n");
+    weight_norm = (n_training_samples > 0) ? mcget_ncount() / (double)n_training_samples : 1.0;
+    printf("Weight norm = %g\n", weight_norm);
+%}
+TRACE
+%{
+  if (local_id%batch_size == 0){
+    double t0 = walltime();
+    // ========================================================================
+    // ======================== SAMPLING A BATCH OF NEUTRONS ==================
+    // ========================================================================
+
+    for (int i = 0; i < batch_size * dim; i++) {
+        float u1 = ((float) rand()) / (float)RAND_MAX;
+        float u2 = ((float) rand()) / (float)RAND_MAX;
+        xt[i] = sqrtf(-2.0f * logf(u1)) * cosf(2.0f * M_PI * u2);
+    }
+    double t1 = walltime();
+    if (verbose) printf("Gaussian init: %.3f ms\n", 1000.0 * (t1 - t0));
+    t0 = walltime();
+
+    int rc = torch_run_model(model, xt, batch_size, dim, output);
+    if (rc != 0) {
+        fprintf(stderr, "Source_ML_torch: torch_run_model failed (code %d)\n", rc);
+        exit(1);
+    }
+    t1 = walltime();
+    if (verbose) printf("Torch Run: %.3f s\n", (t1 - t0));
+
+    t0 = walltime();
+    inverse_transform(output, output, batch_size, dim, transformer_filename);
+    t1 = walltime();
+    if (verbose) printf("inverse transform: %.3f ms\n",1000.0 * (t1 - t0));
+  }
+
+  idx = local_id % batch_size;
+  base = idx * dim;
+
+  p       = output[base + 0]*weight_norm;
+  double tot_vel = SE2V * sqrt(output[base + 1]*1e9);
+  t       = output[base + 2] * 1e-3;
+  vx      = output[base + 3] * tot_vel;
+  vy      = output[base + 4] * tot_vel;
+  vz      = output[base + 5] * tot_vel;
+  x       = output[base + 6]/100;
+  y       = output[base + 7]/100;
+  z       = output[base + 8]/100;
+  sx      = output[base + 9];
+  sy      = output[base + 10];
+  sz      = output[base + 11];
+
+  local_id++;
+
+%}
+
+
+FINALLY
+%{
+    free(xt);
+    free(output);
+    torch_free_model(model);
+%}
+
+MCDISPLAY
+%{
+%}
+
+END
