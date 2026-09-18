@@ -10,7 +10,7 @@ import numpy as np
 import sys
 
 sys.path.append("../../utils/")
-from data_load import load_mcpl_file, transform, export_model_as_onnx, export_model_as_torchscript
+from data_load import load_mcpl_file, transform
 
 # ==============================================================================
 # ===================== ARGUMENT PARSING ==================================
@@ -178,6 +178,4 @@ if __name__ == "__main__":
     )
     np.save("../../data_files/losses/vae_train.npy", train_losses)
     np.save("../../data_files/losses/vae_val.npy", val_losses)
-    export_model_as_onnx(vae, "../../data_files/models/VAE.onnx", device="mps")
-    export_model_as_torchscript(vae, "../../data_files/models/VAE_torch.pt", device="mps")
 
