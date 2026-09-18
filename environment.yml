@@ -1,0 +1,24 @@
+name: mcpl_torch
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pytorch-cpu
+  - cmake
+  - make
+  - cxx-compiler
+  - c-compiler
+  - onnx
+  - onnxruntime
+  - onnxruntime-cpp
+  - mcstas
+  - mcstasscript
+  - mcpl
+  - matplotlib
+  - tqdm
+  - pip
+  - pip:
+      - onnxscript
+      - np2mcpl
+      - "numpy<2"  # np2mcpl's wheel is built against the NumPy 1.x ABI
