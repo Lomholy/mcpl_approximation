@@ -13,10 +13,11 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--plot", action="store_true")
 parser.add_argument("--loss", action="store_true")
 parser.add_argument("--n_samples", default=1_000_000)
+parser.add_argument("--device", default="mps")
 args = parser.parse_args()
 batch_size = 10000
 n_samples = int(args.n_samples)
-device = "mps"
+device = args.device
 
 
 ckpt = torch.load("../../data_files/models/CFM.pth", map_location=device)
