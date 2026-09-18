@@ -40,11 +40,18 @@ artifacts and intentionally not committed, matching how
 ```bash
 micromamba create -n mcpl_torch -c conda-forge \
     python=3.11 pytorch-cpu cmake make cxx-compiler c-compiler \
-    onnx onnxruntime numpy mcstas
+    onnx onnxruntime onnxruntime-cpp numpy mcstas tqdm matplotlib onnxscript
 micromamba activate mcpl_torch
 pip install np2mcpl
 pip install "numpy<2"   # np2mcpl's wheel is built against the NumPy 1.x ABI
 ```
+
+`onnxruntime` (conda-forge) only ships the Python bindings, not the C API
+headers/linkable library that `../onnx_implementation/Source_ML.comp` needs
+to compile; `onnxruntime-cpp` provides those. `tqdm`/`matplotlib` are used by
+`models/CFM/train.py` and `models/CFM/eval.py`, and `onnxscript` is required
+by `utils/data_load.py:export_model_as_onnx`'s dynamo-based
+`torch.onnx.export` call.
 
 ## Build and install the wrapper
 

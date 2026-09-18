@@ -1,6 +1,6 @@
 import sys
 sys.path.append("../../utils/")
-from data_load import inverse_transform, get_transformer_limits, export_model_as_onnx
+from data_load import inverse_transform, get_transformer_limits, export_model_as_onnx, export_model_as_torchscript
 from plotting import plot_correlations_12d
 from model import VelocityField, Sampler
 import torch
@@ -49,6 +49,7 @@ while len(samples) < n_samples:
     print(f"Iteration time = {time.time() - start}")
 print(next(sampler.parameters()).dtype)
 export_model_as_onnx(sampler, "../../data_files/models/CFM_sampler.onnx", device)
+export_model_as_torchscript(sampler, "../../data_files/models/CFM_sampler.pt", device)
 
 
 samples = samples[:n_samples]
