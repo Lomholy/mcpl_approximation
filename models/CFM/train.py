@@ -3,7 +3,7 @@ import os
 from model import VelocityField
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 sys.path.append("../../utils/")
-from data_load import load_mcpl_file, transform, export_model_as_onnx
+from data_load import load_mcpl_file, transform
 import argparse
 from tqdm import tqdm
 import torch
