@@ -61,7 +61,7 @@ COMPONENT Origin = Progress_bar()
 
 COMPONENT src = Source_ML(
     ML_filename=model_filename,
-    device=device
+    device=device, verbose=1, GPU_verbose=0
     )
 AT(0,0,0) ABSOLUTE
 

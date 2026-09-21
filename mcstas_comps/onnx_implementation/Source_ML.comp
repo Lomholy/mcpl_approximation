@@ -53,7 +53,7 @@ DEFINE COMPONENT Source_ML
 SETTING PARAMETERS (string ML_filename="",
                     string device = "auto",
                     int batch_size = 10000,
-                    verbose=1
+                    verbose=0, GPU_verbose = 0
                    )
 
 
@@ -248,7 +248,7 @@ INITIALIZE
     }
     CHECK(api->ReleaseAvailableProviders(avail_providers, n_avail_providers));
 
-    if (verbose){
+    if (GPU_verbose){
       CHECK(api->SetSessionLogSeverityLevel(session_options, 0));
     }
     // Optional: set number of threads. 0 means auto
@@ -331,9 +331,7 @@ TRACE
 
 
     for (int i = 0; i < batch_size * dim; i++) {
-        float u1 = ((float) rand()) / (float)RAND_MAX;
-        float u2 = ((float) rand()) / (float)RAND_MAX;
-        xt[i] = sqrtf(-2.0f * logf(u1)) * cosf(2.0f * M_PI * u2);
+        xt[i] = randnorm();
     }
     double t1 = walltime();
     printf("Gaussian init: %.3f ms\n", 1000.0 * (t1 - t0));
