@@ -141,16 +141,29 @@ def get_transformer_limits(file_path="gaussian_transformer.bin"):
     return lims, grid, sorted_cols
 
 
-def transform(data, jitter=1e-12, file_path="gaussian_transformer.bin"):
+def transform(data, jitter=1e-12, file_path="gaussian_transformer.bin", max_grid_samples=1_000_000):
+    """Rank-Gaussianize `data` and persist an inverse-transform lookup grid.
+
+    The per-sample training targets (`output`) always use the exact rank of
+    every row in `data`. The *stored* grid/sorted_cols lookup table used for
+    inference-time interpolation is capped at `max_grid_samples` points
+    (subsampled evenly from the sorted column), since inference always
+    interpolates anyway and a multi-million-point exact grid buys no extra
+    accuracy over a well-spread 1M-point one.
+    """
     rng = np.random.default_rng()
     data = np.asarray(data, dtype=np.float32)
 
     n, d = data.shape
+    grid_n = min(n, max_grid_samples)
 
-    grid = (np.arange(n, dtype=np.float32) + 0.5) / n
+    grid = (np.arange(grid_n, dtype=np.float32) + 0.5) / grid_n
     sorted_cols = []
 
     output = np.zeros((n, d), dtype=np.float32)
+
+    if grid_n < n:
+        grid_idx = np.linspace(0, n - 1, grid_n).round().astype(np.int64)
 
     for j in range(d):
         col = data[:, j]
@@ -166,7 +179,11 @@ def transform(data, jitter=1e-12, file_path="gaussian_transformer.bin"):
         u = (ranks + 0.5) / n
 
         output[:, j] = normal_icdf_np(u).astype(np.float32)
-        sorted_cols.append(np.sort(col).astype(np.float32))
+
+        col_sorted = np.sort(col)
+        if grid_n < n:
+            col_sorted = col_sorted[grid_idx]
+        sorted_cols.append(col_sorted.astype(np.float32))
     save_transform_binary(file_path, grid, sorted_cols)
     output = torch.asarray(output)
     torch.save(output, "../../data_files/samples/gaussian_input.pkl")
@@ -189,6 +206,77 @@ def inverse_transform(data, file_path="gaussian_transformer.bin"):
         output[:, j] = np.interp(uj, grid, sorted_cols[j])
 
     return output
+
+
+class InverseGaussRankTransform(nn.Module):
+    """Inverse rank-Gaussian transform as a torch.nn.Module.
+
+    This is a tensor-op port of `inverse_transform`/the C
+    `inverse_transform`/`interp` functions in Source_ML.comp, so it can be
+    scripted/exported as part of a model's graph instead of living in a
+    separate `transformer_filename` .bin file read by hand-ported C. Buffers
+    are kept in float32 (rather than the .bin format's float64) to match the
+    precision the rest of the export graph already runs in, and so the
+    combined graph stays within a dtype that execution providers such as
+    CoreML support natively without silently falling back nodes to CPU.
+    """
+
+    def __init__(self, grid, sorted_cols):
+        super().__init__()
+        grid_t = torch.as_tensor(np.asarray(grid), dtype=torch.float32).contiguous()
+        # sorted_cols arrives as (d, n) from load_transform_binary; store
+        # transposed to (n, d) so forward() can gather both dims in one shot.
+        cols_t = torch.as_tensor(np.asarray(sorted_cols), dtype=torch.float32).t().contiguous()
+        self.register_buffer("grid", grid_t)
+        self.register_buffer("sorted_cols_t", cols_t)
+        self.register_buffer("lo", grid_t[0].clone())
+        self.register_buffer("hi", grid_t[-1].clone())
+
+    @classmethod
+    def from_file(cls, file_path: str) -> "InverseGaussRankTransform":
+        grid, sorted_cols = load_transform_binary(file_path)
+        return cls(grid, sorted_cols)
+
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        # Inlined rather than referencing the module-level SQRT2 float:
+        # torch.jit.script rejects closed-over Python globals here.
+        u = 0.5 * (1.0 + torch.erf(z / 1.4142135623730951))
+        u = torch.clamp(u, self.lo, self.hi)
+
+        # `grid` is always the uniform quantile grid (i + 0.5) / n that
+        # transform() produces, so the bracketing index and interpolation
+        # fraction can be computed analytically in O(1) instead of via
+        # torch.searchsorted. This both avoids an O(batch * dim * n) blowup
+        # against multi-million-point grids and sidesteps aten.searchsorted
+        # having no registered ONNX decomposition in the dynamo exporter.
+        n = self.grid.shape[0]
+        pos = u * n - 0.5
+        lo_idx = torch.clamp(pos.floor(), 0, n - 2).to(torch.int64)
+        hi_idx = lo_idx + 1
+        t = torch.clamp(pos - lo_idx.to(pos.dtype), 0.0, 1.0)
+
+        cols_lo = torch.gather(self.sorted_cols_t, 0, lo_idx)
+        cols_hi = torch.gather(self.sorted_cols_t, 0, hi_idx)
+
+        return cols_lo + t * (cols_hi - cols_lo)
+
+
+class ModelWithTransform(nn.Module):
+    """Composes a Gaussian-space sampler with an InverseGaussRankTransform.
+
+    Exporting this instead of the bare sampler makes the exported ONNX/
+    TorchScript file consume Gaussian noise and emit real-space neutron
+    phase-space values directly, so mcstas_comps no longer needs a separate
+    transformer_filename alongside the model file.
+    """
+
+    def __init__(self, sampler: nn.Module, transform: InverseGaussRankTransform):
+        super().__init__()
+        self.sampler = sampler
+        self.transform = transform
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.transform(self.sampler(x))
 
 
 # ==============================================================================
@@ -284,8 +372,16 @@ def save_data_as_mcpl(data, filename):
     np2mcpl.save(filename, output)
 
 
-def export_model_as_onnx(input_model: nn.Module, onnx_path: str, device: str):
+def export_model_as_onnx(
+    input_model: nn.Module,
+    onnx_path: str,
+    device: str,
+    transformer_file_path: str = "",
+):
     input_model = input_model.to(device=device)
+    if transformer_file_path:
+        transform = InverseGaussRankTransform.from_file(transformer_file_path).to(device=device)
+        input_model = ModelWithTransform(input_model, transform)
     input_model.eval()
     dummy_input = torch.randn(10000, 12).to(device)
     # Export ONNX with external weights
@@ -325,8 +421,12 @@ def export_model_as_torchscript(
     torch_path: str,
     device: str,
     n_training_samples: int = 1_000_000,
+    transformer_file_path: str = "",
 ):
     input_model = input_model.to(device=device)
+    if transformer_file_path:
+        transform = InverseGaussRankTransform.from_file(transformer_file_path).to(device=device)
+        input_model = ModelWithTransform(input_model, transform)
     input_model.eval()
     scripted_module = torch.jit.script(input_model)
     # TorchScript's analog of ONNX's model.metadata_props: named byte blobs

@@ -11,11 +11,17 @@ import numpy as np
 sys.path.append("../../utils")
 from data_load import save_transform_binary  # noqa: E402
 
-if __name__ == "__main__":
+
+def write_smoke_transformer(path="gaussian_transformer_smoke.bin"):
     rng = np.random.default_rng(0)
     n = 2000
     d = 12
     grid = (np.arange(n) + 0.5) / n
     sorted_cols = np.sort(rng.normal(size=(d, n)), axis=1)
-    save_transform_binary("gaussian_transformer_smoke.bin", grid, sorted_cols)
-    print("wrote gaussian_transformer_smoke.bin")
+    save_transform_binary(path, grid, sorted_cols)
+    return path
+
+
+if __name__ == "__main__":
+    path = write_smoke_transformer()
+    print(f"wrote {path}")

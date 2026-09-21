@@ -20,6 +20,7 @@ def add_arguments(parser):
     parser.add_argument("--model_filename", default="../../data_files/models/CFM.pth")
     parser.add_argument("--device", default="mps")
     parser.add_argument("--input_mcpl", type=str, default= "../../data_files/mcpl_files/ODIN.mcpl.gz")
+    parser.add_argument("--max_grid_samples", type=int, default=1_000_000)
 
 
 # ---------------------------------------------------------
@@ -151,7 +152,14 @@ args = parser.parse_args()
 input_mcpl = args.input_mcpl
 
 data = load_mcpl_file(input_mcpl, int(args.n_particles))
-data = torch.asarray(transform(data, file_path="../../data_files/preprocess/gaussian_transformer.bin"), dtype=torch.float32)
+data = torch.asarray(
+    transform(
+        data,
+        file_path="../../data_files/preprocess/gaussian_transformer.bin",
+        max_grid_samples=args.max_grid_samples,
+    ),
+    dtype=torch.float32,
+)
 
 dim = data.shape[1]
 device = args.device

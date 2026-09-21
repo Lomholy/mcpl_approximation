@@ -29,7 +29,6 @@
 DEFINE COMPONENT Source_ML
 
 SETTING PARAMETERS (string ML_filename="",
-                    string transformer_filename = "",
                     int batch_size = 10000,
                     verbose=1
                    )
@@ -60,9 +59,6 @@ SHARE
         exit(1);                                      \
     }
 
-  // Functions for Gauss rank scaling
-  #define SQRT2 1.4142135623730951
-
   #include <time.h>
 
 double walltime()
@@ -71,114 +67,6 @@ double walltime()
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec + 1e-9 * ts.tv_nsec;
 }
-
-// --------------------------------------------------
-// Load binary transform
-// --------------------------------------------------
-void load_transform_binary(char* path,
-                           int* n, int* d,
-                           double** grid,
-                           double** sorted_cols)
-{
-    FILE* f = fopen(path, "rb");
-    if (!f) {
-        perror("fopen");
-        exit(1);
-    }
-
-    fread(n, sizeof(int), 1, f);
-    fread(d, sizeof(int), 1, f);
-
-    *grid = malloc((*n) * sizeof(double));
-    *sorted_cols = malloc((*n) * (*d) * sizeof(double));
-
-    fread(*grid, sizeof(double), *n, f);
-    fread(*sorted_cols, sizeof(double), (*n) * (*d), f);
-
-    fclose(f);
-}
-
-// --------------------------------------------------
-// Normal CDF (matches your Python version)
-// --------------------------------------------------
-double normal_cdf(double z)
-{
-    return 0.5 * (1.0 + erf(z / SQRT2));
-}
-
-// --------------------------------------------------
-// Linear interpolation (np.interp equivalent)
-// --------------------------------------------------
-double interp(double x, const double* xs, const double* ys, int n)
-{
-    int lo = 0;
-    int hi = n - 1;
-
-    // binary search
-    while (hi - lo > 1) {
-        int mid = (lo + hi) / 2;
-        if (xs[mid] > x)
-            hi = mid;
-        else
-            lo = mid;
-    }
-
-    double t = (x - xs[lo]) / (xs[hi] - xs[lo]);
-    return ys[lo] + t * (ys[hi] - ys[lo]);
-}
-
-// --------------------------------------------------
-// Clamp helper
-// --------------------------------------------------
-double clamp(double x, double lo, double hi)
-{
-    if (x < lo) return lo;
-    if (x > hi) return hi;
-    return x;
-}
-
-// --------------------------------------------------
-// Inverse transform
-// data:    input (n × d) [row-major]
-// output:  output (n × d) [row-major]
-// --------------------------------------------------
-void inverse_transform(const float* data,
-                       float* output,
-                       int n, int d,
-                       char* file_path)
-{
-    int n_file, d_file;
-    double* grid;
-    double* sorted_cols;
-
-    load_transform_binary(file_path, &n_file, &d_file,
-                          &grid, &sorted_cols);
-
-    double lo = grid[0];
-    double hi = grid[n_file - 1];
-
-    for (int j = 0; j < d; j++) {
-        const double* col = &sorted_cols[j * n_file];
-
-        for (int i = 0; i < n; i++) {
-            double z = data[i * d + j];
-
-            // u = normal_cdf(z)
-            double u = normal_cdf(z);
-
-            // clamp
-            u = clamp(u, lo, hi);
-
-            // interpolate
-            output[i * d + j] = (float)interp(u, grid, col, n_file);
-        }
-    }
-
-    free(grid);
-    free(sorted_cols);
-}
-
-
 
   %}
 /* Neutron parameters: (x,y,z,vx,vy,vz,t,sx,sy,sz,p) */
@@ -334,13 +222,7 @@ TRACE
     t1 = walltime();
     printf("ONNX Run: %.3f s\n", (t1 - t0));
 
-    t0 = walltime();
-
     CHECK(api->GetTensorMutableData(output_tensor, (void**)&output_data));
-    inverse_transform(output_data, output_data, batch_size, dim, transformer_filename);
-    t1 = walltime();
-
-    printf("inverse transform: %.3f ms\n",1000.0 * (t1 - t0));
   }
   
   idx = local_id % batch_size;

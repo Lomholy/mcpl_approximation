@@ -49,8 +49,19 @@ while len(samples) < n_samples:
     samples = samples + batch.tolist()
     print(f"Iteration time = {time.time() - start}")
 print(next(sampler.parameters()).dtype)
-export_model_as_onnx(sampler, "../../data_files/models/CFM_sampler.onnx", device)
-export_model_as_torchscript(sampler, "../../data_files/models/CFM_sampler.pt", device)
+transformer_file_path = "../../data_files/preprocess/gaussian_transformer.bin"
+export_model_as_onnx(
+    sampler,
+    "../../data_files/models/CFM_sampler.onnx",
+    device,
+    transformer_file_path=transformer_file_path,
+)
+export_model_as_torchscript(
+    sampler,
+    "../../data_files/models/CFM_sampler.pt",
+    device,
+    transformer_file_path=transformer_file_path,
+)
 
 
 samples = samples[:n_samples]
