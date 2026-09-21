@@ -8,6 +8,7 @@ sys.path.append("../../utils")
 
 from model import Sampler, VelocityField  # noqa: E402
 from data_load import export_model_as_torchscript  # noqa: E402
+from make_smoke_transformer import write_smoke_transformer  # noqa: E402
 
 if __name__ == "__main__":
     device = "cpu"
@@ -26,12 +27,24 @@ if __name__ == "__main__":
         )
         n_training_samples = 0
 
+    transformer_path = "../../data_files/preprocess/gaussian_transformer.bin"
+    if not os.path.exists(transformer_path):
+        print(
+            f"⚠️  No trained transformer found at {transformer_path}; "
+            "generating a synthetic one for pipeline smoke-testing only."
+        )
+        transformer_path = write_smoke_transformer("gaussian_transformer_smoke.bin")
+
     velocity = velocity.to(device)
     sampler = Sampler(velocity, n_steps=64, device=device)
 
     torch_path = "CFM_sampler.pt"
     export_model_as_torchscript(
-        sampler, torch_path, device=device, n_training_samples=n_training_samples
+        sampler,
+        torch_path,
+        device=device,
+        n_training_samples=n_training_samples,
+        transformer_file_path=transformer_path,
     )
 
     # Round-trip check, mirroring what Source_ML_torch.comp's C wrapper will do.
