@@ -15,8 +15,25 @@
 * A source that samples from a machine learning model (Type Conditional Flow Matching)
 *
 * %D
-* This component 
+* This component
 *
+* On CoreML (device=auto or device=coreml on Apple hardware), model load may
+* print "E5RT encountered an STL exception ... unbounded dimension" to
+* stderr. This is expected and harmless: the exported model's batch
+* dimension is dynamic (so batch_size can differ from what the model was
+* exported with), but CoreML's ML Program compiler cannot target the Neural
+* Engine for a few ops (the inverse Gaussian-rank transform's Floor/
+* GatherElements) under a dynamic batch shape. ONNX Runtime catches the
+* failed compile attempt and automatically falls those specific ops back to
+* CPU, so sampling still completes correctly -- the message is CoreML's own
+* diagnostic output (bypassing ORT's logging, hence unaffected by verbose),
+* not a fatal error. Restricting CoreML to a specific compute unit (or
+* forcing static-only input shapes) silences the message but disables
+* CoreML acceleration for the *entire* graph, not just those ops, so it is
+* deliberately left as-is; only exporting the model with a fixed batch
+* dimension matching this component's batch_size would eliminate it for
+* real, at the cost of no longer being able to change batch_size without
+* re-exporting.
 *
 * Example: Source_simple(radius=0.1, dist=2, focus_xw=.1, focus_yh=.1, E0=14, dE=2)
 *
