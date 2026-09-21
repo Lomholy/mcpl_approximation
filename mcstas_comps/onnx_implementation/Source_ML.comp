@@ -22,6 +22,11 @@
 *
 * %P
 * gauss: [1]                          Gaussian (1) or Flat (0) energy/wavelength distribution
+* device: [str]                       ONNX Runtime execution provider to use:
+*                                      "auto" (default) picks the best available
+*                                      GPU provider (CUDA, then ROCm, then CoreML)
+*                                      and falls back to CPU; or force one of
+*                                      "cuda"/"rocm"/"coreml"/"cpu" explicitly.
 *
 * %E
 *******************************************************************************/
@@ -29,6 +34,7 @@
 DEFINE COMPONENT Source_ML
 
 SETTING PARAMETERS (string ML_filename="",
+                    string device = "auto",
                     int batch_size = 10000,
                     verbose=1
                    )
@@ -45,10 +51,11 @@ SHARE
   #include "onnxruntime/core/session/onnxruntime_c_api.h"
 
   #include <stdlib.h>
+  #include <string.h>
   #include <math.h>
   #include <sys/stat.h>
   #include <stdio.h>
-  
+
 
 
   #define CHECK(status)                                  \
@@ -66,6 +73,90 @@ double walltime()
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec + 1e-9 * ts.tv_nsec;
+}
+
+// --------------------------------------------------
+// Hardware auto-detection: try to append a GPU-accelerated execution
+// provider, preferring CUDA, then ROCm, then CoreML, falling back to CPU
+// (ORT's own default) if none of those are compiled in or available on this
+// machine. Each dedicated SessionOptionsAppendExecutionProvider_* call
+// itself returns failure (not a crash) when that provider isn't usable, so
+// these are safe to attempt speculatively even without checking
+// GetAvailableProviders first -- but we check it anyway to avoid noisy
+// failed-append log lines for providers that were never compiled in.
+// --------------------------------------------------
+int ep_provider_available(char** avail, int n_avail, const char* name)
+{
+    for (int i = 0; i < n_avail; i++) {
+        if (strcmp(avail[i], name) == 0) return 1;
+    }
+    return 0;
+}
+
+OrtStatus* ep_append_cuda(const OrtApi* api, OrtSessionOptions* session_options)
+{
+    OrtCUDAProviderOptions cuda_options;
+    memset(&cuda_options, 0, sizeof(cuda_options));
+    cuda_options.device_id = 0;
+    cuda_options.cudnn_conv_algo_search = OrtCudnnConvAlgoSearchExhaustive;
+    cuda_options.gpu_mem_limit = (size_t)-1;
+    cuda_options.do_copy_in_default_stream = 1;
+    return api->SessionOptionsAppendExecutionProvider_CUDA(session_options, &cuda_options);
+}
+
+OrtStatus* ep_append_rocm(const OrtApi* api, OrtSessionOptions* session_options)
+{
+    OrtROCMProviderOptions rocm_options;
+    memset(&rocm_options, 0, sizeof(rocm_options));
+    rocm_options.device_id = 0;
+    rocm_options.gpu_mem_limit = (size_t)-1;
+    rocm_options.do_copy_in_default_stream = 1;
+    return api->SessionOptionsAppendExecutionProvider_ROCM(session_options, &rocm_options);
+}
+
+OrtStatus* ep_append_coreml(const OrtApi* api, OrtSessionOptions* session_options)
+{
+    const char* keys[]   = {"ModelFormat"};
+    const char* values[] = {"MLProgram"};
+    return api->SessionOptionsAppendExecutionProvider(session_options, "CoreML", keys, values, 1);
+}
+
+// Attempts to append the named provider ("cuda"/"rocm"/"coreml"/"cpu").
+// Returns 1 if the session will use it (for "cpu" this is trivially true --
+// there is no EP to append, ORT always has a CPU fallback), 0 if the
+// provider is unavailable or failed to append.
+int ep_try_append(const OrtApi* api, OrtSessionOptions* session_options,
+                   char** avail, int n_avail, const char* name, int verbose)
+{
+    OrtStatus* status = NULL;
+
+    if (strcmp(name, "cpu") == 0) {
+        if (verbose) printf("Source_ML: using cpu execution provider\n");
+        return 1;
+    } else if (strcmp(name, "cuda") == 0) {
+        if (!ep_provider_available(avail, n_avail, "CUDAExecutionProvider")) return 0;
+        status = ep_append_cuda(api, session_options);
+    } else if (strcmp(name, "rocm") == 0) {
+        if (!ep_provider_available(avail, n_avail, "ROCMExecutionProvider")) return 0;
+        status = ep_append_rocm(api, session_options);
+    } else if (strcmp(name, "coreml") == 0) {
+        if (!ep_provider_available(avail, n_avail, "CoreMLExecutionProvider")) return 0;
+        status = ep_append_coreml(api, session_options);
+    } else {
+        fprintf(stderr, "Source_ML: unknown device '%s'\n", name);
+        return 0;
+    }
+
+    if (status != NULL) {
+        if (verbose) {
+            fprintf(stderr, "Source_ML: failed to append %s execution provider: %s\n",
+                    name, api->GetErrorMessage(status));
+        }
+        api->ReleaseStatus(status);
+        return 0;
+    }
+    if (verbose) printf("Source_ML: using %s execution provider\n", name);
+    return 1;
 }
 
   %}
@@ -112,16 +203,34 @@ INITIALIZE
 
     // Create session options
     CHECK(api->CreateSessionOptions(&session_options));
-    const char* keys[]   = {"ModelFormat"};
-    const char* values[] = {"MLProgram"};
 
-    CHECK(api->SessionOptionsAppendExecutionProvider(
-        session_options,
-        "CoreML",
-        keys,
-        values,
-        1
-    ));
+    // ========================================================================
+    // ===================== HARDWARE AUTO-DETECTION ==========================
+    // ========================================================================
+    char** avail_providers = NULL;
+    int n_avail_providers = 0;
+    CHECK(api->GetAvailableProviders(&avail_providers, &n_avail_providers));
+    if (verbose) {
+        printf("Source_ML: available execution providers:");
+        for (int i = 0; i < n_avail_providers; i++) printf(" %s", avail_providers[i]);
+        printf("\n");
+    }
+
+    if (strcmp(device, "auto") == 0) {
+        static const char* device_priority[] = {"cuda", "rocm", "coreml", "cpu"};
+        int n_device_priority = sizeof(device_priority) / sizeof(device_priority[0]);
+        for (int i = 0; i < n_device_priority; i++) {
+            if (ep_try_append(api, session_options, avail_providers, n_avail_providers,
+                               device_priority[i], verbose)) {
+                break;
+            }
+        }
+    } else if (!ep_try_append(api, session_options, avail_providers, n_avail_providers,
+                               device, verbose)) {
+        fprintf(stderr, "Source_ML: requested device '%s' unavailable; falling back to CPU\n", device);
+    }
+    CHECK(api->ReleaseAvailableProviders(avail_providers, n_avail_providers));
+
     if (verbose){
       CHECK(api->SetSessionLogSeverityLevel(session_options, 0));
     }

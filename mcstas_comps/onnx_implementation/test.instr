@@ -30,7 +30,8 @@
 *
 * %End
 *******************************************************************************/
-DEFINE INSTRUMENT Test_Source_ML(string model_filename = "../../data_files/models/CFM_sampler.onnx")
+DEFINE INSTRUMENT Test_Source_ML(string model_filename = "../../data_files/models/CFM_sampler.onnx",
+                                  string device = "auto")
 
 /* The DECLARE section allows us to declare variables or  small      */
 /* functions in C syntax. These may be used in the whole instrument. */
@@ -59,7 +60,8 @@ COMPONENT Origin = Progress_bar()
   AT (0,0,0) ABSOLUTE
 
 COMPONENT src = Source_ML(
-    ML_filename=model_filename
+    ML_filename=model_filename,
+    device=device
     )
 AT(0,0,0) ABSOLUTE
 
