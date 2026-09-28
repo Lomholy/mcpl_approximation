@@ -79,20 +79,52 @@ COMPONENT al = Union_make_material(
  process_string = "al_inc,al_pow", my_absorption = 1.391566265060241)
 AT (0,      0,      0) ABSOLUTE
 
-COMPONENT sample_nc = NCrystal_process(
- cfg = "Fe_sg225_Iron-gamma.ncmat;temp=25C")
+/* Gamma-phase iron (space group Fm-3m / 225), matching the material the
+ * former sample_nc = NCrystal_process(cfg = "Fe_sg225_Iron-gamma.ncmat")
+ * described, but via McStas's own bundled Fe_Gamma.laz + Incoherent_process
+ * instead of NCrystal -- avoids depending on ncrystal-config/libNCrystal
+ * being consistently resolved at compile time vs. runtime (see the
+ * "Running with MPI" section of mcstas_comps/README.md for the class of
+ * environment issue this sidesteps entirely). sigma/unit_cell_volume follow
+ * the same convention already used for al_inc/al_pow below: sigma is the
+ * total incoherent cross section per unit cell (sigma_inc-per-atom *
+ * multiplicity), unit_cell_volume is Vc -- both read directly from
+ * Fe_Gamma.laz's own header (sigma_inc=0.4 barn * 4 atoms/cell = 1.6 barn,
+ * Vc=49.02 A^3). my_absorption is unchanged from the NCrystal version: that
+ * parameter is independent of which process supplies the scattering.
+ */
+COMPONENT sample_pow = Powder_process(
+ reflections = "Fe_Gamma.laz", interact_fraction = 0.2)
+AT (0,      0,      0) ABSOLUTE
+
+COMPONENT sample_inc = Incoherent_process(
+ sigma = 1.6, unit_cell_volume = 49.02,
+ interact_fraction = 0.2)
 AT (0,      0,      0) ABSOLUTE
 
 COMPONENT sample = Union_make_material(
- process_string = "sample_nc", my_absorption = 2.56)
+ process_string = "sample_inc,sample_pow", my_absorption = 2.56)
 AT (0,      0,      0) ABSOLUTE
 
-COMPONENT gas_nc = NCrystal_process(
- cfg = "gasmix::H2/10bar")
+/* H2 gas at 10 bar, ~298 K -- replaces the former
+ * gas_nc = NCrystal_process(cfg = "gasmix::H2/10bar"). No Powder_process
+ * component (a gas has no Bragg peaks); modeled as pure incoherent
+ * scattering off H2 molecules. sigma = 2 * sigma_inc(H) = 2 * 80.26 barn
+ * (H's large bound incoherent cross section, doubled for the two atoms per
+ * H2 molecule). unit_cell_volume = 4114.3 A^3/molecule, the ideal-gas
+ * molar volume (R*T/P) at 10 bar / 298 K converted to a per-molecule
+ * volume via Avogadro's number -- an approximation (ideal gas, no
+ * molecular binding effects) reasonable for a rough sample environment,
+ * worth revisiting with real gas data later. my_absorption is unchanged
+ * from the NCrystal version.
+ */
+COMPONENT gas_inc = Incoherent_process(
+ sigma = 160.52, unit_cell_volume = 4114.3,
+ interact_fraction = 0.2)
 AT (0,      0,      0) ABSOLUTE
 
 COMPONENT gas = Union_make_material(
- process_string = "gas_nc", my_absorption = 21.29)
+ process_string = "gas_inc", my_absorption = 21.29)
 AT (0,      0,      0) ABSOLUTE
 
 COMPONENT metal_cyl_env = Union_cylinder(
