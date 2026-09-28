@@ -153,3 +153,28 @@ that, point `model_filename` at a real trained export (produced by
 `../data_files/models/CFM.pth` and
 `../data_files/preprocess/gaussian_transformer.bin` exist from the normal
 training/eval pipeline -- see the repo root README).
+
+### Running with MPI
+
+`Test_Source_ML.instr`'s sample environment uses NCrystal (via McStas's
+`NCrystal_process`/`Union_master` components). Running with `--mpi=N` for
+`N > 1` switches the compiler mcrun uses from plain `cc` to `mpicc`, which
+has **its own** underlying-compiler variable -- setting
+`MCSTAS_CC_OVERRIDE` alone does not affect it, so on the same conda-linker-
+vs-newer-SDK setup this README already covers, an MPI build can fail (or,
+worse, link against a mismatched NCrystal and fail at runtime with `NCrystal:
+... ERROR: Inconsistency detected between included ncrystal.h and linked
+NCrystal library!`) even though the identical non-MPI run works. For this
+Open MPI build, also set `OMPI_CC`/`OMPI_CXX`:
+
+```bash
+MCSTAS_CC_OVERRIDE=/usr/bin/clang OMPI_CC=/usr/bin/clang OMPI_CXX=/usr/bin/clang++ \
+    mcrun --mpi=4 -n 100000 Test_Source_ML.instr model_filename=CFM_sampler.onnx backend=auto
+```
+
+If you still hit the NCrystal inconsistency error after that, force a clean
+recompile first (`rm -f Test_Source_ML.c Test_Source_ML.out`) before the MPI
+run: `mcrun` can silently reuse a binary compiled for a previous (e.g.
+non-MPI) invocation of the same instrument instead of recompiling, which
+will disagree with the currently-installed NCrystal library if it was
+updated since that binary was built.
