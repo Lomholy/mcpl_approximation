@@ -31,15 +31,20 @@
 * %D
 * This component
 *
-* On CoreML (device=auto or device=coreml on Apple hardware, ONNX backend
-* only), model load may print "E5RT encountered an STL exception ...
-* unbounded dimension" to stderr. This is expected and harmless: the
-* exported model's batch dimension is dynamic (so batch_size can differ from
-* what the model was exported with), but CoreML's ML Program compiler cannot
-* target the Neural Engine for a few ops under a dynamic batch shape. ONNX
-* Runtime catches the failed compile attempt and automatically falls those
-* specific ops back to CPU, so sampling still completes correctly -- the
-* message is CoreML's own diagnostic output, not a fatal error.
+* device="coreml" (ONNX backend only) is deliberately excluded from
+* device="auto" on Apple hardware: verified 2026-09-28 (onnxruntime 1.30.0)
+* to crash the whole process (EXC_BAD_ACCESS/SIGBUS, a misaligned access
+* deep inside Apple's own CoreML/BNNS runtime, not this component's or
+* libmlbackend's code) when actually running inference on a model with the
+* inverse Gaussian-rank transform's Floor/GatherElements ops embedded under
+* a dynamic batch shape -- which, since that transform is now always
+* embedded (see above), is every model this component loads. A load-time
+* "E5RT encountered an STL exception ... unbounded dimension" message alone
+* is a separate, genuinely harmless CoreML diagnostic; the crash described
+* here happens later, during the first TRACE batch, with no such warning
+* necessarily preceding it. device="coreml" remains selectable explicitly
+* for anyone who has verified their own model/hardware/OS combination
+* doesn't hit this, but "auto" will never pick it.
 *
 * Example: mcrun Test_Source_ML.instr ML_filename=CFM_sampler.onnx backend=auto
 *
@@ -53,11 +58,11 @@
 *                       or "torch".
 * device: [str]        ONNX Runtime execution provider to use when the
 *                       resolved backend is "onnx": "auto" (default) picks
-*                       the best available GPU provider (CUDA, then ROCm,
-*                       then CoreML) and falls back to CPU; or force one of
-*                       "cuda"/"rocm"/"coreml"/"cpu" explicitly. Ignored for
-*                       backend="torch" (LibTorch always picks CUDA > MPS >
-*                       CPU automatically).
+*                       the best available of CUDA, then ROCm, then CPU
+*                       (CoreML is deliberately excluded from "auto" -- see
+*                       above); or force one of "cuda"/"rocm"/"coreml"/"cpu"
+*                       explicitly. Ignored for backend="torch" (LibTorch
+*                       always picks CUDA > MPS > CPU automatically).
 * batch_size: [1]      Number of neutrons sampled per model call.
 * verbose: [1]         Print progress/timing information.
 * GPU_verbose: [1]     Raise the ONNX Runtime session log severity
@@ -94,6 +99,17 @@ SHARE
   #include <stdlib.h>
   #include <string.h>
   #include <math.h>
+
+  /* mcstas's randnorm() is actually the macro _randnorm2(_particle->randstate)
+   * (see mcstas-generated instrument code), not a bare zero-argument
+   * function -- it threads an explicit per-particle/per-MPI-rank RNG state
+   * (randstate_t*, a type this file never otherwise needs) through every
+   * call. ml_backend.h's MLRandNormFn takes an opaque void* for exactly this
+   * reason: this wrapper is what knows the real type on the way back in. */
+  static double source_ml_randnorm(void* rng_state)
+  {
+      return _randnorm2((randstate_t*)rng_state);
+  }
 %}
 /* Neutron parameters: (x,y,z,vx,vy,vz,t,sx,sy,sz,p) */
 DECLARE
@@ -127,7 +143,7 @@ INITIALIZE
     // =========================== LOAD MODEL ==================================
     // ========================================================================
     model = ml_load_model(ML_filename, backend_enum, device, verbose, GPU_verbose,
-                           batch_size, dim, randnorm, &n_training_samples);
+                           batch_size, dim, source_ml_randnorm, &n_training_samples);
     if (model == NULL) {
         fprintf(stderr, "Source_ML: failed to load model '%s'\n", ML_filename);
         exit(1);
@@ -152,7 +168,7 @@ INITIALIZE
 TRACE
 %{
   if (local_id % batch_size == 0) {
-    int rc = ml_generate_neutron(model, output);
+    int rc = ml_generate_neutron(model, _particle->randstate, output);
     if (rc != 0) {
         fprintf(stderr, "Source_ML: ml_generate_neutron failed (code %d)\n", rc);
         exit(1);

@@ -159,9 +159,22 @@ bool onnx_load(OnnxState& st, const char* path, const char* device, int verbose,
         printf("\n");
     }
 
+    // CoreML is deliberately excluded from "auto": running this library's
+    // models (which always have the inverse Gaussian-rank transform's
+    // Floor/GatherElements ops embedded under a dynamic batch shape --
+    // see InverseGaussRankTransform in utils/data_load.py) through CoreML
+    // was verified (2026-09-28, onnxruntime 1.30.0, macOS 11 target on
+    // Apple Silicon) to crash inside Apple's own CoreML/BNNS runtime
+    // (EXC_BAD_ACCESS/SIGBUS, misaligned access deep in
+    // Espresso::BNNSEngine, called from MLNeuralNetworkEngine) during
+    // inference, not merely emit the harmless "unbounded dimension"
+    // load-time diagnostic this component used to assume was the whole
+    // story. It remains selectable via device="coreml" for anyone who has
+    // verified their model/hardware/OS combination doesn't hit this, but
+    // "auto" must not pick something that can crash the whole process.
     const char* device_name = (device != NULL && device[0] != '\0') ? device : "auto";
     if (strcmp(device_name, "auto") == 0) {
-        static const char* device_priority[] = {"cuda", "rocm", "coreml", "cpu"};
+        static const char* device_priority[] = {"cuda", "rocm", "cpu"};
         int n_device_priority = sizeof(device_priority) / sizeof(device_priority[0]);
         for (int i = 0; i < n_device_priority; i++) {
             if (ep_try_append(st.api, st.session_options, avail_providers, n_avail_providers,
@@ -173,7 +186,8 @@ bool onnx_load(OnnxState& st, const char* path, const char* device, int verbose,
                                device_name, verbose)) {
         fprintf(stderr, "ml_backend (onnx): requested device '%s' unavailable; falling back to CPU\n", device_name);
     }
-    st.api->ReleaseAvailableProviders(avail_providers, n_avail_providers);
+    OrtStatus* release_status = st.api->ReleaseAvailableProviders(avail_providers, n_avail_providers);
+    if (release_status != NULL) st.api->ReleaseStatus(release_status);
 
     if (gpu_verbose) {
         ORT_CHECK(st.api->SetSessionLogSeverityLevel(st.session_options, 0));
@@ -409,13 +423,13 @@ MLModelHandle* ml_load_model(const char* path, MLBackend backend, const char* de
     return handle;
 }
 
-int ml_generate_neutron(MLModelHandle* handle, float* output)
+int ml_generate_neutron(MLModelHandle* handle, void* rng_state, float* output)
 {
     if (handle == nullptr) return 1;
 
     double t0 = handle->verbose ? ml_walltime() : 0.0;
     for (int i = 0; i < handle->batch_size * handle->dim; i++) {
-        handle->noise[i] = (float)handle->randnorm();
+        handle->noise[i] = (float)handle->randnorm(rng_state);
     }
     if (handle->verbose) {
         printf("Gaussian init: %.3f ms\n", 1000.0 * (ml_walltime() - t0));

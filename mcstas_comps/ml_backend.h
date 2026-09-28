@@ -31,17 +31,23 @@ typedef enum {
     ML_BACKEND_TORCH = 2
 } MLBackend;
 
-/* Returns one standard-normal random sample. Source_ML.comp passes
- * mcstas's own randnorm() through this, so the noise
- * ml_generate_neutron() feeds into the model uses mcstas's per-particle /
- * per-MPI-rank seeded RNG stream, rather than a separately-seeded stream
- * private to this library (which, being a plain shared library rather than
+/* Returns one standard-normal random sample drawn using the RNG state at
+ * `rng_state`. Source_ML.comp passes a thin wrapper around mcstas's own
+ * randnorm() through this (mcstas's randnorm() is actually a macro,
+ * `_randnorm2(_particle->randstate)` -- a per-particle/per-MPI-rank seeded
+ * state threaded explicitly through every call, not a bare global
+ * generator), so the noise ml_generate_neutron() feeds into the model uses
+ * mcstas's own RNG stream, rather than a separately-seeded stream private
+ * to this library (which, being a plain shared library rather than
  * mcstas-generated instrument code, has no access to mcstas's own RNG state
- * otherwise). Fixing this some other way was the point of upstream commit
- * aa423dd ("Fix MPI ranks generating identical neutrons"); routing the
- * callback through here preserves that fix instead of reintroducing a
- * separately-seeded (or unseeded) generator inside the library. */
-typedef double (*MLRandNormFn)(void);
+ * or its `_particle` context otherwise). `rng_state` is opaque here
+ * precisely because its real type (`randstate_t*`) is defined only in
+ * mcstas-generated code, not in anything this library includes; the
+ * component's wrapper is what knows the real type and casts it back.
+ * Preserving mcstas's actual per-particle/per-rank state (rather than
+ * assuming a single fixed global stream) is also what keeps this correct
+ * under upstream commit aa423dd's MPI-seeding fix. */
+typedef double (*MLRandNormFn)(void* rng_state);
 
 /* Loads the model at `path`.
  *
@@ -80,12 +86,14 @@ MLModelHandle* ml_load_model(const char* path, MLBackend backend, const char* de
                               MLRandNormFn randnorm_fn, long* n_training_samples);
 
 /* Generates one full batch: fills the internal `batch_size * dim` noise
- * buffer via `randnorm_fn` (this is the "initial sample" that used to be
- * drawn directly in each component's TRACE section), runs it through the
- * loaded model, and writes the `batch_size * dim` row-major result into
- * caller-allocated `output`. Dispatches internally to whichever backend was
- * resolved at load time. Returns 0 on success. */
-int ml_generate_neutron(MLModelHandle* handle, float* output);
+ * buffer by calling `randnorm_fn(rng_state)` (this is the "initial sample"
+ * that used to be drawn directly in each component's TRACE section), runs
+ * it through the loaded model, and writes the `batch_size * dim` row-major
+ * result into caller-allocated `output`. Dispatches internally to whichever
+ * backend was resolved at load time. `rng_state` is passed straight through
+ * to every `randnorm_fn` call uninterpreted -- see MLRandNormFn's comment.
+ * Returns 0 on success. */
+int ml_generate_neutron(MLModelHandle* handle, void* rng_state, float* output);
 
 void ml_free_model(MLModelHandle* handle);
 

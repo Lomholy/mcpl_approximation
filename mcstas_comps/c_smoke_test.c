@@ -8,12 +8,15 @@
 
 #include "ml_backend.h"
 
-/* Outside McStas there is no randnorm() to pass through as the noise
- * source, so this smoke test supplies its own (plain, unseeded-for-
+/* Outside McStas there is no randnorm()/randstate_t to pass through as the
+ * noise source, so this smoke test supplies its own (plain, unseeded-for-
  * reproducibility Box-Muller) generator -- good enough to prove the
- * load/generate/free pipeline runs, not a statistically rigorous RNG. */
-static double smoke_randnorm(void)
+ * load/generate/free pipeline runs, not a statistically rigorous RNG.
+ * Takes (and ignores) the opaque rng_state MLRandNormFn passes through, to
+ * match the real signature Source_ML.comp's wrapper implements. */
+static double smoke_randnorm(void* rng_state)
 {
+    (void)rng_state;
     double u1 = ((double)rand() + 1.0) / ((double)RAND_MAX + 1.0);
     double u2 = ((double)rand()) / (double)RAND_MAX;
     return sqrt(-2.0 * log(u1)) * cos(2.0 * M_PI * u2);
@@ -21,13 +24,13 @@ static double smoke_randnorm(void)
 
 int main(int argc, char** argv)
 {
-    if (argc < 2 || argc > 3) {
-        fprintf(stderr, "usage: %s <path-to-model.onnx|.pt> [auto|onnx|torch]\n", argv[0]);
+    if (argc < 2 || argc > 4) {
+        fprintf(stderr, "usage: %s <path-to-model.onnx|.pt> [auto|onnx|torch] [device]\n", argv[0]);
         return 1;
     }
 
     MLBackend backend = ML_BACKEND_AUTO;
-    if (argc == 3) {
+    if (argc >= 3) {
         if (strcmp(argv[2], "onnx") == 0) {
             backend = ML_BACKEND_ONNX;
         } else if (strcmp(argv[2], "torch") == 0) {
@@ -37,12 +40,13 @@ int main(int argc, char** argv)
             return 1;
         }
     }
+    const char* device = (argc == 4) ? argv[3] : "auto";
 
     const int batch = 8;
     const int dim = 12;
 
     long n_training_samples = -1;
-    MLModelHandle* handle = ml_load_model(argv[1], backend, "auto", /*verbose=*/1,
+    MLModelHandle* handle = ml_load_model(argv[1], backend, device, /*verbose=*/1,
                                            /*gpu_verbose=*/0, batch, dim, smoke_randnorm,
                                            &n_training_samples);
     if (handle == NULL) {
@@ -53,7 +57,7 @@ int main(int argc, char** argv)
 
     float* output = malloc((size_t)batch * dim * sizeof(float));
 
-    int rc = ml_generate_neutron(handle, output);
+    int rc = ml_generate_neutron(handle, NULL, output);
     if (rc != 0) {
         fprintf(stderr, "ml_generate_neutron failed with code %d\n", rc);
         free(output);
