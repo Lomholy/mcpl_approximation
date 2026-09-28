@@ -29,6 +29,8 @@ so `Source_ML`'s output is already physical-space. There is nothing like a
   installs it (with its header) into the active environment; auto-detects
   LibTorch via `WITH_TORCH` (`AUTO`/`ON`/`OFF`). Also builds `c_smoke_test`,
   a pure-C sanity check of the library, independent of McStas.
+- `Makefile` -- thin wrapper so `make` / `make install` do the usual
+  out-of-source CMake build/install dance in one command (see below).
 - `c_smoke_test.c` -- loads and runs a model (either backend) through the C
   API only.
 - `export_onnx_smoke.py` / `export_torch_smoke.py` -- export a
@@ -72,41 +74,43 @@ PyTorch and rebuild, not a crash.
 `Source_ML.comp`'s `DEPENDENCY` line is just `-lmlbackend`; it relies on
 mcstas's own conda-aware `CFLAGS` (from `mccode_config.json`) for
 `-I`/`-L`/`-rpath` into the active environment, so `libmlbackend` and
-`ml_backend.h` need to be installed there:
+`ml_backend.h` need to be installed there. A `Makefile` wraps the usual
+out-of-source CMake build (`mkdir build && cd build && cmake .. && make &&
+cmake --install .`) so this is just:
 
 ```bash
 cd mcstas_comps
-mkdir -p build && cd build
-cmake -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" ..
-make -j4
-cmake --install .
-cd ..
+make install
 ```
 
-This auto-detects LibTorch (`WITH_TORCH=AUTO`, the default): if
-`pytorch-cpu` is installed and `torch.utils.cmake_prefix_path` is on
-`CMAKE_PREFIX_PATH`, the build includes TorchScript support; otherwise it
-silently builds ONNX-only (check the `cmake` configure output for which one
-happened). To require or forbid TorchScript support explicitly:
+This picks up `$CONDA_PREFIX` as the install prefix automatically, and
+auto-detects LibTorch (`WITH_TORCH=AUTO`, the default): if `pytorch-cpu` is
+installed, the build includes TorchScript support; otherwise it silently
+builds ONNX-only (check the build output for `libmlbackend: LibTorch found`
+vs. `not found` to see which happened). To require or forbid TorchScript
+support explicitly:
 
 ```bash
-# Force TorchScript support on, failing configure if LibTorch isn't found:
-TORCH_CMAKE=$(python -c "import torch; print(torch.utils.cmake_prefix_path)")
-cmake -DCMAKE_PREFIX_PATH="$TORCH_CMAKE" -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" -DWITH_TORCH=ON ..
-
-# Force an ONNX-only build even if LibTorch is installed:
-cmake -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" -DWITH_TORCH=OFF ..
+make WITH_TORCH=ON install    # fail if LibTorch isn't found, instead of silently building ONNX-only
+make WITH_TORCH=OFF install   # ONNX-only, even if LibTorch is installed
 ```
 
 If your system's compiler toolchain is newer than the one conda-forge's
 `cxx-compiler`/`c-compiler` packages bundle (macOS with a recent Xcode
 Command Line Tools is the case we hit -- conda's linker can't parse the
 SDK's `.tbd` files and the build fails with `ld: warning: ... malformed
-file`), configure with the system compiler instead:
+file`), build with the system compiler instead:
 
 ```bash
-CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" ..
+CC=/usr/bin/clang CXX=/usr/bin/clang++ make install
 ```
+
+(Every `make` target above also works without `install`, e.g. plain `make`
+just builds into `build/` without touching `$CONDA_PREFIX`; `make clean`
+removes `build/`. See the `Makefile` itself, or run the underlying CMake
+commands directly, if you need more control -- e.g. a second build
+directory to compare `WITH_TORCH=ON` vs `OFF` side by side, which this
+wrapper doesn't try to support.)
 
 Optionally sanity-check the library on its own, independent of McStas:
 
