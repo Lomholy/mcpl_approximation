@@ -15,7 +15,7 @@
  * to ML_BACKEND_TORCH.
  *
  * The inverse Gaussian-rank transform is embedded in the exported model
- * graph itself (see ../../utils/data_load.py: InverseGaussRankTransform /
+ * graph itself (see ../utils/data_load.py: InverseGaussRankTransform /
  * ModelWithTransform), so ml_generate_neutron()'s output is already
  * physical-space -- there is no separate transform file or step here. */
 

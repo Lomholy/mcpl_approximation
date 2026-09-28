@@ -2,7 +2,7 @@
 """
 End-to-end benchmark: for each generative model (CFM, VAE), train it, evaluate
 it (which exports an ONNX and a TorchScript sampler), then run the fused
-Source_ML McStas component (mcstas_comps/Source_ML) against the freshly
+Source_ML McStas component (mcstas_comps) against the freshly
 exported model, once per backend (backend=onnx, backend=torch), and report
 the average time each backend takes to produce one batch of neutrons.
 
@@ -15,7 +15,7 @@ Usage (from anywhere, run inside the mcpl_torch environment or let
 
 Both models' train/eval scripts, and the mcstas instrument, are invoked as
 subprocesses via `micromamba run -n <env>`, exactly as documented in
-mcstas_comps/Source_ML/README.md.
+mcstas_comps/README.md.
 """
 import argparse
 import json
@@ -41,7 +41,7 @@ class ModelConfig:
     model_dir: str  # relative to REPO_ROOT
     train_script: str
     eval_script: str
-    onnx_model_rel: str  # relative to mcstas_comps/Source_ML/ (i.e. from the instrument's cwd)
+    onnx_model_rel: str  # relative to mcstas_comps/ (i.e. from the instrument's cwd)
     torch_model_rel: str
     supports_n_particles: bool = True
 
@@ -67,7 +67,7 @@ MODEL_CONFIGS = {
     ),
 }
 
-SOURCE_ML_INSTR_DIR = "mcstas_comps/Source_ML"
+SOURCE_ML_INSTR_DIR = "mcstas_comps"
 SOURCE_ML_INSTR_FILE = "Test_Source_ML.instr"
 
 
@@ -127,7 +127,7 @@ def micromamba(env_name, args):
 
 def ensure_mlbackend_built(env_name, cc_override):
     """Build+install libmlbackend into the active env if it isn't there yet,
-    following mcstas_comps/Source_ML/README.md. Forces -DWITH_TORCH=ON since
+    following mcstas_comps/README.md. Forces -DWITH_TORCH=ON since
     this benchmark exercises both backends and needs TorchScript support
     compiled in, not just the ONNX-only default fallback."""
     prefix = subprocess.run(

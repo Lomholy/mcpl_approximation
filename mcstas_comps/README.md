@@ -32,13 +32,13 @@ so `Source_ML`'s output is already physical-space. There is nothing like a
 - `c_smoke_test.c` -- loads and runs a model (either backend) through the C
   API only.
 - `export_onnx_smoke.py` / `export_torch_smoke.py` -- export a
-  `VelocityField`/`Sampler` (see `../../models/CFM/model.py`) to
+  `VelocityField`/`Sampler` (see `../models/CFM/model.py`) to
   `CFM_sampler.onnx` / `CFM_sampler.pt` via `utils/data_load.py`. Use a real
-  checkpoint at `../../data_files/models/CFM.pth` if present, otherwise
+  checkpoint at `../data_files/models/CFM.pth` if present, otherwise
   export an untrained model for pipeline smoke-testing.
 - `make_smoke_transformer.py` -- writes a synthetic
   `gaussian_transformer_smoke.bin`, standing in for the real
-  `../../data_files/preprocess/gaussian_transformer.bin` when that isn't
+  `../data_files/preprocess/gaussian_transformer.bin` when that isn't
   available. This is consumed by the two export scripts above (which bake it
   into the exported model), not by `Source_ML.comp` itself -- see "No
   transform file" above. Values are unconstrained random Gaussians, so
@@ -53,7 +53,7 @@ are generated artifacts and intentionally not committed.
 ## One-time environment setup
 
 ```bash
-mamba env create -f ../../environment.yml
+mamba env create -f ../environment.yml
 mamba activate mcpl_torch
 ```
 
@@ -75,7 +75,7 @@ mcstas's own conda-aware `CFLAGS` (from `mccode_config.json`) for
 `ml_backend.h` need to be installed there:
 
 ```bash
-cd mcstas_comps/Source_ML
+cd mcstas_comps
 mkdir -p build && cd build
 cmake -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" ..
 make -j4
@@ -125,7 +125,7 @@ python export_torch_smoke.py   # writes CFM_sampler.pt (only useful with a Torch
 ```
 
 Both scripts call `make_smoke_transformer.write_smoke_transformer()`
-themselves if `../../data_files/preprocess/gaussian_transformer.bin` isn't
+themselves if `../data_files/preprocess/gaussian_transformer.bin` isn't
 present, so you don't need to run it separately.
 
 ## Run the instrument
@@ -146,6 +146,6 @@ With the untrained smoke-test model this only confirms the
 load/generate/emit pipeline executes; it does not validate physics. For
 that, point `model_filename` at a real trained export (produced by
 `export_onnx_smoke.py`/`export_torch_smoke.py` once
-`../../data_files/models/CFM.pth` and
-`../../data_files/preprocess/gaussian_transformer.bin` exist from the normal
+`../data_files/models/CFM.pth` and
+`../data_files/preprocess/gaussian_transformer.bin` exist from the normal
 training/eval pipeline -- see the repo root README).

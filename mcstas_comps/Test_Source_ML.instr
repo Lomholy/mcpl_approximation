@@ -9,7 +9,7 @@
 * Origin: NBI@UCPH funded by ACTNXT
 * %INSTRUMENT_SITE: Templates
 *
-* Smoke test for the fused Source_ML component (mcstas_comps/Source_ML),
+* Smoke test for the fused Source_ML component (mcstas_comps/Source_ML.comp),
 * which replaces the former separate onnx_implementation/test.instr and
 * torchscript/Test_Source_ML_torch.instr.
 *
@@ -18,7 +18,7 @@
 * export_onnx_smoke.py (CFM_sampler.onnx) in this directory, not a trained
 * model -- this only exercises the load/generate/emit pipeline. The inverse
 * Gaussian-rank transform is embedded in the exported model itself (see
-* ../../utils/data_load.py), so no separate transform file is needed.
+* ../utils/data_load.py), so no separate transform file is needed.
 *
 * Example: mcrun Test_Source_ML.instr model_filename=CFM_sampler.onnx backend=auto
 * Example: mcrun Test_Source_ML.instr model_filename=CFM_sampler.pt backend=auto

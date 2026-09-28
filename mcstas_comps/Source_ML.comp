@@ -24,7 +24,7 @@
 * INITIALIZE, not a crash or a build failure.
 *
 * The inverse Gaussian-rank transform is embedded in the exported model
-* graph itself (see ../../utils/data_load.py: InverseGaussRankTransform /
+* graph itself (see ../utils/data_load.py: InverseGaussRankTransform /
 * ModelWithTransform), so this component's output is already physical-space;
 * there is no separate transform file to pass in.
 *
@@ -45,7 +45,7 @@
 *
 * %P
 * ML_filename: [str]   Path to an exported .onnx or .pt/.pth model (see
-*                       ../../utils/data_load.py:export_model_as_onnx /
+*                       ../utils/data_load.py:export_model_as_onnx /
 *                       export_model_as_torchscript), with the inverse
 *                       Gaussian-rank transform already embedded.
 * backend: [str]       "auto" (default, inferred from ML_filename's

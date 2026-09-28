@@ -19,7 +19,7 @@ if(NOT ONNXRUNTIME_INCLUDE_DIR OR NOT ONNXRUNTIME_LIBRARY)
     message(FATAL_ERROR
         "onnxruntime-cpp not found (need both onnxruntime_c_api.h and "
         "libonnxruntime). Activate an environment with onnxruntime-cpp "
-        "installed (see ../../environment.yml) or pass -DCMAKE_PREFIX_PATH "
+        "installed (see ../environment.yml) or pass -DCMAKE_PREFIX_PATH "
         "to one.")
 endif()
 
