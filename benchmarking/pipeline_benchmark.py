@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 """
 End-to-end benchmark: for each generative model (CFM, VAE), train it, evaluate
-it (which exports an ONNX and a TorchScript sampler), then run both the ONNX
-(mcstas_comps/onnx_implementation) and TorchScript (mcstas_comps/torchscript)
-McStas source components against the freshly exported model and report the
-average time each backend takes to produce one batch of neutrons.
+it (which exports an ONNX and a TorchScript sampler), then run the fused
+Source_ML McStas component (mcstas_comps) against the freshly
+exported model, once per backend (backend=onnx, backend=torch), and report
+the average time each backend takes to produce one batch of neutrons.
 
 Usage (from anywhere, run inside the mcpl_torch environment or let
 --env pick it up via `micromamba run`):
@@ -13,9 +13,9 @@ Usage (from anywhere, run inside the mcpl_torch environment or let
     python benchmarking/pipeline_benchmark.py --models cfm
     python benchmarking/pipeline_benchmark.py --n-particles 200000 --n-eval-samples 50000 --n-batches 5
 
-Both models' train/eval scripts, and both mcstas instruments, are invoked as
+Both models' train/eval scripts, and the mcstas instrument, are invoked as
 subprocesses via `micromamba run -n <env>`, exactly as documented in
-mcstas_comps/torchscript/README.md.
+mcstas_comps/README.md.
 """
 import argparse
 import json
@@ -28,11 +28,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-BATCH_SIZE = 10000  # SETTING PARAMETERS default in both Source_ML(.comp)/Source_ML_torch.comp
+BATCH_SIZE = 10000  # SETTING PARAMETERS default in Source_ML.comp
 
-RUN_TIME_RE = re.compile(r"(?:ONNX Run|Torch Run): ([\d.]+) s")
+RUN_TIME_RE = re.compile(r"Model Run: ([\d.]+) s")
 GAUSS_INIT_RE = re.compile(r"Gaussian init: ([\d.]+) ms")
-INVERSE_RE = re.compile(r"inverse transform: ([\d.]+) ms")
 
 
 @dataclass
@@ -42,9 +41,8 @@ class ModelConfig:
     model_dir: str  # relative to REPO_ROOT
     train_script: str
     eval_script: str
-    onnx_model_rel: str  # relative to mcstas_comps/*/ (i.e. from the instrument's cwd)
+    onnx_model_rel: str  # relative to mcstas_comps/ (i.e. from the instrument's cwd)
     torch_model_rel: str
-    transformer_rel: str
     supports_n_particles: bool = True
 
 
@@ -57,7 +55,6 @@ MODEL_CONFIGS = {
         eval_script="eval.py",
         onnx_model_rel="../../data_files/models/CFM_sampler.onnx",
         torch_model_rel="../../data_files/models/CFM_sampler.pt",
-        transformer_rel="../../data_files/preprocess/gaussian_transformer.bin",
     ),
     "vae": ModelConfig(
         key="vae",
@@ -67,14 +64,11 @@ MODEL_CONFIGS = {
         eval_script="eval.py",
         onnx_model_rel="../../data_files/models/VAE_sampler.onnx",
         torch_model_rel="../../data_files/models/VAE_sampler.pt",
-        transformer_rel="../../data_files/preprocess/gaussian_transformer.bin",
     ),
 }
 
-ONNX_INSTR_DIR = "mcstas_comps/onnx_implementation"
-ONNX_INSTR_FILE = "test.instr"
-TORCH_INSTR_DIR = "mcstas_comps/torchscript"
-TORCH_INSTR_FILE = "Test_Source_ML_torch.instr"
+SOURCE_ML_INSTR_DIR = "mcstas_comps"
+SOURCE_ML_INSTR_FILE = "Test_Source_ML.instr"
 
 
 @dataclass
@@ -131,29 +125,32 @@ def micromamba(env_name, args):
     return ["micromamba", "run", "-n", env_name] + args
 
 
-def ensure_torchwrap_built(env_name, cc_override):
-    """Build+install libtorchwrap into the active env if it isn't there yet,
-    following mcstas_comps/torchscript/README.md."""
+def ensure_mlbackend_built(env_name, cc_override):
+    """Build+install libmlbackend into the active env if it isn't there yet,
+    following mcstas_comps/README.md. Forces -DWITH_TORCH=ON since
+    this benchmark exercises both backends and needs TorchScript support
+    compiled in, not just the ONNX-only default fallback."""
     prefix = subprocess.run(
         micromamba(env_name, ["printenv", "CONDA_PREFIX"]),
         capture_output=True, text=True, check=True,
     ).stdout.strip()
-    lib_path = Path(prefix) / "lib" / "libtorchwrap.dylib"
+    lib_path = Path(prefix) / "lib" / "libmlbackend.dylib"
     if lib_path.exists():
         return
-    log("Building and installing libtorchwrap (not found in env)")
-    torchscript_dir = REPO_ROOT / TORCH_INSTR_DIR
+    log("Building and installing libmlbackend (not found in env)")
+    source_ml_dir = REPO_ROOT / SOURCE_ML_INSTR_DIR
     torch_cmake = subprocess.run(
         micromamba(env_name, ["python", "-c", "import torch; print(torch.utils.cmake_prefix_path)"]),
         capture_output=True, text=True, check=True,
     ).stdout.strip()
-    build_dir = torchscript_dir / "build"
+    build_dir = source_ml_dir / "build"
     build_dir.mkdir(exist_ok=True)
     run_streamed(
         micromamba(env_name, [
             "cmake",
             f"-DCMAKE_PREFIX_PATH={torch_cmake}",
             f"-DCMAKE_INSTALL_PREFIX={prefix}",
+            "-DWITH_TORCH=ON",
             "..",
         ]),
         cwd=build_dir,
@@ -200,11 +197,10 @@ def benchmark_component(backend, instr_dir, instr_file, params, args):
 
     run_times = [float(x) for x in RUN_TIME_RE.findall(output)]
     gauss_times = [float(x) / 1000.0 for x in GAUSS_INIT_RE.findall(output)]
-    inverse_times = [float(x) / 1000.0 for x in INVERSE_RE.findall(output)]
     if not run_times:
         raise RuntimeError(f"No '{backend}' batch-timing lines found in mcrun output; check the run log above.")
 
-    total_times = [g + r + i for g, r, i in zip(gauss_times, run_times, inverse_times)]
+    total_times = [g + r for g, r in zip(gauss_times, run_times)]
 
     result = BackendResult(
         backend=backend,
@@ -222,16 +218,16 @@ def benchmark_model(cfg: ModelConfig, args):
 
     onnx_result = benchmark_component(
         "ONNX",
-        ONNX_INSTR_DIR,
-        ONNX_INSTR_FILE,
-        {"model_filename": cfg.onnx_model_rel},
+        SOURCE_ML_INSTR_DIR,
+        SOURCE_ML_INSTR_FILE,
+        {"model_filename": cfg.onnx_model_rel, "backend": "onnx"},
         args,
     )
     torch_result = benchmark_component(
         "TorchScript",
-        TORCH_INSTR_DIR,
-        TORCH_INSTR_FILE,
-        {"model_filename": cfg.torch_model_rel, "transformer_filename": cfg.transformer_rel},
+        SOURCE_ML_INSTR_DIR,
+        SOURCE_ML_INSTR_FILE,
+        {"model_filename": cfg.torch_model_rel, "backend": "torch"},
         args,
     )
     return {"onnx": onnx_result, "torchscript": torch_result}
@@ -270,7 +266,7 @@ def main():
     parser.add_argument("--json-out", type=Path, default=None, help="Optionally dump the summary results as JSON to this path.")
     args = parser.parse_args()
 
-    ensure_torchwrap_built(args.env, args.cc_override)
+    ensure_mlbackend_built(args.env, args.cc_override)
 
     all_results = {}
     for key in args.models:

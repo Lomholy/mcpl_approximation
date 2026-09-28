@@ -1,10 +1,14 @@
+"""Exports a smoke-test TorchScript model for Test_Source_ML.instr's
+backend="torch" path. Renamed/moved from the former
+mcstas_comps/torchscript/torch_test.py (Source_ML_torch.comp is gone; both
+backends now live under this one component)."""
 import os
 import sys
 
 import torch
 
-sys.path.append("../../models/CFM")
-sys.path.append("../../utils")
+sys.path.append("../models/CFM")
+sys.path.append("../utils")
 
 from model import Sampler, VelocityField  # noqa: E402
 from data_load import export_model_as_torchscript  # noqa: E402
@@ -13,7 +17,7 @@ from make_smoke_transformer import write_smoke_transformer  # noqa: E402
 if __name__ == "__main__":
     device = "cpu"
 
-    checkpoint_path = "../../data_files/models/CFM.pth"
+    checkpoint_path = "../data_files/models/CFM.pth"
     velocity = VelocityField()
 
     if os.path.exists(checkpoint_path):
@@ -27,7 +31,7 @@ if __name__ == "__main__":
         )
         n_training_samples = 0
 
-    transformer_path = "../../data_files/preprocess/gaussian_transformer.bin"
+    transformer_path = "../data_files/preprocess/gaussian_transformer.bin"
     if not os.path.exists(transformer_path):
         print(
             f"⚠️  No trained transformer found at {transformer_path}; "
@@ -47,7 +51,7 @@ if __name__ == "__main__":
         transformer_file_path=transformer_path,
     )
 
-    # Round-trip check, mirroring what Source_ML_torch.comp's C wrapper will do.
+    # Round-trip check, mirroring what Source_ML.comp's C wrapper will do.
     extra_files = {"n_training_samples": ""}
     reloaded = torch.jit.load(torch_path, _extra_files=extra_files)
     print("n_training_samples metadata:", extra_files["n_training_samples"])
