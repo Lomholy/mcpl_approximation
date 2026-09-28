@@ -1,0 +1,195 @@
+/*******************************************************************************
+*
+* McStas, neutron ray-tracing package
+*         Copyright 1997-2026, All rights reserved
+*         Risoe National Laboratory, Roskilde, Denmark
+*         Institut Laue Langevin, Grenoble, France
+*
+* Component: Source_ML
+*
+* %I
+* Written by: Daniel Lomholt Christensen
+* Date: September 2026
+* Origin: NBI@UCPH funded by ACTNXT
+*
+* A source that samples from a machine learning model (Type Conditional Flow
+* Matching, or a VAE) exported to either ONNX or TorchScript. Supersedes the
+* former separate Source_ML (ONNX-only) and Source_ML_torch (TorchScript-only)
+* components: this one component dispatches to whichever backend
+* `ML_filename` needs, via libmlbackend (ml_backend.h/.cpp in this
+* directory). LibTorch support in libmlbackend is optional (see README.md);
+* onnxruntime-cpp is the only dependency this component's DEPENDENCY line
+* requires unconditionally. Pointing this component at a .pt/.pth file when
+* libmlbackend was built without LibTorch produces a clear error message at
+* INITIALIZE, not a crash or a build failure.
+*
+* The inverse Gaussian-rank transform is embedded in the exported model
+* graph itself (see ../../utils/data_load.py: InverseGaussRankTransform /
+* ModelWithTransform), so this component's output is already physical-space;
+* there is no separate transform file to pass in.
+*
+* %D
+* This component
+*
+* On CoreML (device=auto or device=coreml on Apple hardware, ONNX backend
+* only), model load may print "E5RT encountered an STL exception ...
+* unbounded dimension" to stderr. This is expected and harmless: the
+* exported model's batch dimension is dynamic (so batch_size can differ from
+* what the model was exported with), but CoreML's ML Program compiler cannot
+* target the Neural Engine for a few ops under a dynamic batch shape. ONNX
+* Runtime catches the failed compile attempt and automatically falls those
+* specific ops back to CPU, so sampling still completes correctly -- the
+* message is CoreML's own diagnostic output, not a fatal error.
+*
+* Example: mcrun Test_Source_ML.instr ML_filename=CFM_sampler.onnx backend=auto
+*
+* %P
+* ML_filename: [str]   Path to an exported .onnx or .pt/.pth model (see
+*                       ../../utils/data_load.py:export_model_as_onnx /
+*                       export_model_as_torchscript), with the inverse
+*                       Gaussian-rank transform already embedded.
+* backend: [str]       "auto" (default, inferred from ML_filename's
+*                       extension: .onnx -> onnx, .pt/.pth -> torch), "onnx",
+*                       or "torch".
+* device: [str]        ONNX Runtime execution provider to use when the
+*                       resolved backend is "onnx": "auto" (default) picks
+*                       the best available GPU provider (CUDA, then ROCm,
+*                       then CoreML) and falls back to CPU; or force one of
+*                       "cuda"/"rocm"/"coreml"/"cpu" explicitly. Ignored for
+*                       backend="torch" (LibTorch always picks CUDA > MPS >
+*                       CPU automatically).
+* batch_size: [1]      Number of neutrons sampled per model call.
+* verbose: [1]         Print progress/timing information.
+* GPU_verbose: [1]     Raise the ONNX Runtime session log severity
+*                       (backend="onnx" only; ignored for "torch").
+*
+* %E
+*******************************************************************************/
+
+DEFINE COMPONENT Source_ML
+
+SETTING PARAMETERS (string ML_filename="",
+                    string backend = "auto",
+                    string device = "auto",
+                    int batch_size = 10000,
+                    verbose=0, GPU_verbose = 0
+                   )
+
+/* libmlbackend (and, if it was built with TorchScript support, the LibTorch
+ * it links) is expected installed into the active environment, e.g. via
+ * `cmake --install` into $CONDA_PREFIX -- see README.md. Note: mcrun does
+ * NOT shell-expand DEPENDENCY strings (they are passed straight into the
+ * compiler's argv), so a literal "$CONDA_PREFIX/lib" here would not resolve;
+ * mcstas's own conda-aware CFLAGS already carry -I${CONDA_PREFIX}/include /
+ * -L${CONDA_PREFIX}/lib / -Wl,-rpath,${CONDA_PREFIX}/lib (see
+ * mccode_config.json), so naming the library is all that's needed. */
+DEPENDENCY "-lmlbackend"
+
+
+SHARE
+%{
+  #include "ml_backend.h"
+
+  #include <stdio.h>
+  #include <stdlib.h>
+  #include <string.h>
+  #include <math.h>
+%}
+/* Neutron parameters: (x,y,z,vx,vy,vz,t,sx,sy,sz,p) */
+DECLARE
+%{
+  int local_id;
+  int idx;
+  int base;
+  int dim;
+  double weight_norm;
+  long n_training_samples;
+
+  MLModelHandle* model;
+  float* output;
+%}
+INITIALIZE
+%{
+    local_id = 0;
+    dim = 12;
+
+    MLBackend backend_enum = ML_BACKEND_AUTO;
+    if (strcmp(backend, "onnx") == 0) {
+        backend_enum = ML_BACKEND_ONNX;
+    } else if (strcmp(backend, "torch") == 0) {
+        backend_enum = ML_BACKEND_TORCH;
+    } else if (strcmp(backend, "auto") != 0) {
+        fprintf(stderr, "Source_ML: unknown backend '%s' (expected auto/onnx/torch)\n", backend);
+        exit(1);
+    }
+
+    // ========================================================================
+    // =========================== LOAD MODEL ==================================
+    // ========================================================================
+    model = ml_load_model(ML_filename, backend_enum, device, verbose, GPU_verbose,
+                           batch_size, dim, randnorm, &n_training_samples);
+    if (model == NULL) {
+        fprintf(stderr, "Source_ML: failed to load model '%s'\n", ML_filename);
+        exit(1);
+    }
+    if (verbose) printf("Model loaded successfully!\n");
+
+    if (n_training_samples > 0) {
+        printf("Number of neutrons trained on: %ld\n", n_training_samples);
+    } else if (verbose) {
+        printf("No n_training_samples metadata found in model; disabling weight renormalization.\n");
+    }
+
+    // ========================================================================
+    // =========================== PREPARE SAMPLING ============================
+    // ========================================================================
+    output = (float*) malloc(batch_size * dim * sizeof(float));
+    if (verbose) printf("Arrays allocated successfully. INITIALIZE finished!\n");
+
+    weight_norm = (n_training_samples > 0) ? mcget_ncount() / (double)n_training_samples : 1.0;
+    printf("Weight norm = %g\n", weight_norm);
+%}
+TRACE
+%{
+  if (local_id % batch_size == 0) {
+    int rc = ml_generate_neutron(model, output);
+    if (rc != 0) {
+        fprintf(stderr, "Source_ML: ml_generate_neutron failed (code %d)\n", rc);
+        exit(1);
+    }
+  }
+
+  idx = local_id % batch_size;
+  base = idx * dim;
+
+  double tot_vel;
+
+  p       = output[base + 0]*weight_norm;
+  tot_vel = SE2V * sqrt(output[base + 1]*1e9);
+  t       = output[base + 2] * 1e-3;
+  vx      = output[base + 3] * tot_vel;
+  vy      = output[base + 4] * tot_vel;
+  vz      = output[base + 5] * tot_vel;
+  x       = output[base + 6]/100;
+  y       = output[base + 7]/100;
+  z       = output[base + 8]/100;
+  sx      = output[base + 9];
+  sy      = output[base + 10];
+  sz      = output[base + 11];
+
+  local_id++;
+
+%}
+
+
+FINALLY
+%{
+    free(output);
+    ml_free_model(model);
+%}
+
+MCDISPLAY
+%{
+%}
+
+END

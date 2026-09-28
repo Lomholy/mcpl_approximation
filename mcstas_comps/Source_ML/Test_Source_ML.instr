@@ -1,0 +1,70 @@
+/*******************************************************************************
+*         McStas instrument definition URL=http://www.mcstas.org
+*
+* Instrument: Test_Source_ML
+*
+* %Identification
+* Written by: Daniel Lomholt Christensen
+* Date: September 2026
+* Origin: NBI@UCPH funded by ACTNXT
+* %INSTRUMENT_SITE: Templates
+*
+* Smoke test for the fused Source_ML component (mcstas_comps/Source_ML),
+* which replaces the former separate onnx_implementation/test.instr and
+* torchscript/Test_Source_ML_torch.instr.
+*
+* %D
+* Defaults point at the untrained ONNX smoke-test artifact produced by
+* export_onnx_smoke.py (CFM_sampler.onnx) in this directory, not a trained
+* model -- this only exercises the load/generate/emit pipeline. The inverse
+* Gaussian-rank transform is embedded in the exported model itself (see
+* ../../utils/data_load.py), so no separate transform file is needed.
+*
+* Example: mcrun Test_Source_ML.instr model_filename=CFM_sampler.onnx backend=auto
+* Example: mcrun Test_Source_ML.instr model_filename=CFM_sampler.pt backend=auto
+*
+* %P
+* model_filename: [str]  Path to the .onnx or .pt/.pth model to sample from.
+* backend: [str]         "auto" (default), "onnx", or "torch" -- see
+*                         Source_ML.comp's own %P documentation.
+* device: [str]          ONNX Runtime execution provider (backend="onnx" only).
+*
+* %Link
+*
+* %End
+*******************************************************************************/
+DEFINE INSTRUMENT Test_Source_ML(string model_filename = "CFM_sampler.onnx",
+                                  string backend = "auto",
+                                  string device = "auto")
+
+DECLARE
+%{
+%}
+
+INITIALIZE
+%{
+%}
+
+TRACE
+
+COMPONENT Origin = Progress_bar()
+  AT (0,0,0) ABSOLUTE
+
+COMPONENT src = Source_ML(
+    ML_filename = model_filename,
+    backend = backend,
+    device = device,
+    verbose = 1, GPU_verbose = 0
+    )
+AT(0,0,0) ABSOLUTE
+
+COMPONENT mon = PSD_monitor(
+    xwidth = 0.1,
+    yheight = 0.1
+)
+AT (0,0,0) RELATIVE PREVIOUS
+
+FINALLY
+%{
+%}
+END

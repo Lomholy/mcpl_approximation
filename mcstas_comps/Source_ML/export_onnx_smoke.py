@@ -1,3 +1,7 @@
+"""Exports a smoke-test ONNX model for Test_Source_ML.instr's backend="onnx"
+path. Replaces the dead mcstas_comps/onnx_implementation/onnx_test.py (which
+referenced a now-nonexistent ../NF/nf_definition module from an earlier
+prototype) with one that mirrors export_torch_smoke.py's structure/model."""
 import os
 import sys
 
@@ -7,7 +11,7 @@ sys.path.append("../../models/CFM")
 sys.path.append("../../utils")
 
 from model import Sampler, VelocityField  # noqa: E402
-from data_load import export_model_as_torchscript  # noqa: E402
+from data_load import export_model_as_onnx  # noqa: E402
 from make_smoke_transformer import write_smoke_transformer  # noqa: E402
 
 if __name__ == "__main__":
@@ -19,13 +23,11 @@ if __name__ == "__main__":
     if os.path.exists(checkpoint_path):
         ckpt = torch.load(checkpoint_path, map_location=device)
         velocity.load_state_dict(ckpt["state_dict"])
-        n_training_samples = 1_000_000
     else:
         print(
             f"⚠️  No trained checkpoint found at {checkpoint_path}; "
             "exporting an untrained model for pipeline smoke-testing only."
         )
-        n_training_samples = 0
 
     transformer_path = "../../data_files/preprocess/gaussian_transformer.bin"
     if not os.path.exists(transformer_path):
@@ -38,20 +40,12 @@ if __name__ == "__main__":
     velocity = velocity.to(device)
     sampler = Sampler(velocity, n_steps=64, device=device)
 
-    torch_path = "CFM_sampler.pt"
-    export_model_as_torchscript(
+    onnx_path = "CFM_sampler.onnx"
+    export_model_as_onnx(
         sampler,
-        torch_path,
+        onnx_path,
         device=device,
-        n_training_samples=n_training_samples,
         transformer_file_path=transformer_path,
     )
 
-    # Round-trip check, mirroring what Source_ML_torch.comp's C wrapper will do.
-    extra_files = {"n_training_samples": ""}
-    reloaded = torch.jit.load(torch_path, _extra_files=extra_files)
-    print("n_training_samples metadata:", extra_files["n_training_samples"])
-
-    x = torch.randn(4, 12, device=device)
-    out = reloaded(x)
-    print("sample output shape:", tuple(out.shape))
+    print(f"wrote {onnx_path}")
