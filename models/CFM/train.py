@@ -166,7 +166,7 @@ device = args.device
 
 model = VelocityField().to(device)
 
-losses, val_losses = train(model, data, args.model_filename)
+losses, val_losses = train(model, data, args.model_filename, device=device)
 
 np.save("../../data_files/losses/cfm_train.npy", np.array(losses))
 np.save("../../data_files/losses/cfm_val.npy", np.array(val_losses))
