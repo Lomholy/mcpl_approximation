@@ -56,13 +56,13 @@
 * backend: [str]       "auto" (default, inferred from ML_filename's
 *                       extension: .onnx -> onnx, .pt/.pth -> torch), "onnx",
 *                       or "torch".
-* device: [str]        ONNX Runtime execution provider to use when the
-*                       resolved backend is "onnx": "auto" (default) picks
-*                       the best available of CUDA, then ROCm, then CPU
+* device: [str]        Where the model runs. For backend "onnx" it is the
+*                       ONNX Runtime execution provider: "auto" (default)
+*                       picks the best available of CUDA, then ROCm, then CPU
 *                       (CoreML is deliberately excluded from "auto" -- see
 *                       above); or force one of "cuda"/"rocm"/"coreml"/"cpu"
-*                       explicitly. Ignored for backend="torch" (LibTorch
-*                       always picks CUDA > MPS > CPU automatically).
+*                       explicitly. For backend "torch", "auto" picks CUDA,
+*                       then CPU; or force one of "cuda"/"mps"/"cpu".
 * batch_size: [1]      Number of neutrons sampled per model call.
 * verbose: [1]         Print progress/timing information.
 * GPU_verbose: [1]     Raise the ONNX Runtime session log severity

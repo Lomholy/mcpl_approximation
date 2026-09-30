@@ -275,26 +275,44 @@ struct TorchState {
     TorchState() : device(torch::kCPU) {}
 };
 
-torch::Device pick_torch_device()
+// "auto" picks CUDA when available and CPU otherwise. MPS is only used when
+// asked for by name.
+torch::Device pick_torch_device(const char* device, int verbose)
 {
-    if (torch::cuda::is_available()) {
-        return torch::Device(torch::kCUDA);
-    }
+    const char* name = (device != NULL && device[0] != '\0') ? device : "auto";
+
+    if (strcmp(name, "auto") == 0 || strcmp(name, "cuda") == 0) {
+        if (torch::cuda::is_available()) {
+            if (verbose) printf("ml_backend (torch): using cuda\n");
+            return torch::Device(torch::kCUDA);
+        }
+        if (strcmp(name, "cuda") == 0) {
+            fprintf(stderr, "ml_backend (torch): requested device 'cuda' unavailable; falling back to CPU\n");
+        }
+    } else if (strcmp(name, "mps") == 0) {
 #ifdef __APPLE__
-    if (torch::hasMPS()) {
-        return torch::Device(torch::kMPS);
-    }
+        if (torch::hasMPS()) {
+            if (verbose) printf("ml_backend (torch): using mps\n");
+            return torch::Device(torch::kMPS);
+        }
 #endif
+        fprintf(stderr, "ml_backend (torch): requested device 'mps' unavailable; falling back to CPU\n");
+    } else if (strcmp(name, "cpu") != 0) {
+        fprintf(stderr, "ml_backend (torch): unknown device '%s'; falling back to CPU\n", name);
+    }
+
+    if (verbose) printf("ml_backend (torch): using cpu\n");
     return torch::Device(torch::kCPU);
 }
 
-bool torch_load(TorchState& st, const char* path, long* n_training_samples)
+bool torch_load(TorchState& st, const char* path, const char* device, int verbose,
+                long* n_training_samples)
 {
     try {
         torch::jit::ExtraFilesMap extra_files;
         extra_files["n_training_samples"] = "";
 
-        st.device = pick_torch_device();
+        st.device = pick_torch_device(device, verbose);
         st.module = torch::jit::load(path, st.device, extra_files);
         st.module.eval();
 
@@ -401,7 +419,7 @@ MLModelHandle* ml_load_model(const char* path, MLBackend backend, const char* de
                         handle->noise, n_training_samples);
     } else {
 #ifdef ML_BACKEND_HAVE_TORCH
-        ok = torch_load(handle->torch_state, path, n_training_samples);
+        ok = torch_load(handle->torch_state, path, device, verbose, n_training_samples);
 #else
         fprintf(stderr,
                 "Warning: '%s' looks like a PyTorch/TorchScript model, but this build of "

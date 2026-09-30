@@ -55,11 +55,12 @@ typedef double (*MLRandNormFn)(void* rng_state);
  * to infer it from `path`'s extension (.onnx -> ONNX Runtime; .pt/.pth ->
  * LibTorch). Inference failing (unrecognized extension) is a load failure.
  *
- * `device` selects the ONNX Runtime execution provider ("auto" picks the
- * best available GPU provider -- CUDA, then ROCm, then CoreML -- falling
- * back to CPU; or force one of "cuda"/"rocm"/"coreml"/"cpu"). Ignored when
- * the resolved backend is LibTorch, which always picks CUDA > MPS > CPU
- * automatically. May be NULL, treated as "auto".
+ * `device` selects where the model runs. For ONNX Runtime it is the
+ * execution provider: "auto" picks CUDA, then ROCm, falling back to CPU; or
+ * force one of "cuda"/"rocm"/"coreml"/"cpu". For LibTorch, "auto" picks CUDA
+ * and falls back to CPU; or force one of "cuda"/"mps"/"cpu". A device that is
+ * unavailable or unknown to the resolved backend falls back to CPU. May be
+ * NULL, treated as "auto".
  *
  * `gpu_verbose` raises the ONNX Runtime session log severity; ignored for
  * LibTorch. `verbose` enables this library's own progress/timing prints

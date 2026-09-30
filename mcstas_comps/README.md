@@ -21,8 +21,10 @@ so `Source_ML`'s output is already physical-space. There is nothing like a
 ## Files
 
 - `Source_ML.comp` -- the McStas component. Takes `ML_filename`, `backend`
-  (`"auto"`/`"onnx"`/`"torch"`), `device` (ONNX Runtime execution provider,
-  ignored for `backend="torch"`), `batch_size`, `verbose`, `GPU_verbose`.
+  (`"auto"`/`"onnx"`/`"torch"`), `device` (`"auto"` picks CUDA, or for ONNX
+  also ROCm, when available and CPU otherwise; `"cuda"`/`"rocm"`/`"coreml"`/
+  `"cpu"` can be forced for ONNX and `"cuda"`/`"mps"`/`"cpu"` for
+  TorchScript), `batch_size`, `verbose`, `GPU_verbose`.
 - `ml_backend.h` / `ml_backend.cpp` -- the unified C-linkage bridge. ONNX
   Runtime is a mandatory dependency; LibTorch is optional (see below).
 - `CMakeLists.txt` -- builds `ml_backend.cpp` into `libmlbackend` and

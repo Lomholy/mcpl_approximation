@@ -27,7 +27,8 @@
 * model_filename: [str]  Path to the .onnx or .pt/.pth model to sample from.
 * backend: [str]         "auto" (default), "onnx", or "torch" -- see
 *                         Source_ML.comp's own %P documentation.
-* device: [str]          ONNX Runtime execution provider (backend="onnx" only).
+* device: [str]          Where the model runs -- see Source_ML.comp's own %P
+*                         documentation.
 *
 * %Link
 *
