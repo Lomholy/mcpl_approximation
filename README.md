@@ -124,7 +124,7 @@ below use the CFM, and the table shows what to swap for the VAE.
 | Folder | `models/CFM` | `models/VAE` |
 | Training time on a laptop CPU | a few minutes | about 10 minutes |
 | Checkpoint | `data_files/models/CFM.pth` | `data_files/models/vae.pth` |
-| Exported models | `CFM_sampler.onnx`, `CFM_sampler.pt` | `VAE_sampler.onnx`, `VAE_sampler.pt` |
+| Exported model | `CFM_sampler.onnx` | `VAE_sampler.onnx` |
 | Check plot | `figures/CFM_neutron.png` | `figures/VAE_neutron.png` |
 
 The scripts use paths relative to their own folder, so run them from the
@@ -157,17 +157,10 @@ python eval.py --n_samples 100000 --plot
 cd ../..
 ```
 
-This writes the two files `Source_ML` can read, both into
-`data_files/models/`:
-
-| File | Backend |
-| --- | --- |
-| `CFM_sampler.onnx` | ONNX Runtime. Always available. |
-| `CFM_sampler.pt` | TorchScript. Needs `libmlbackend` built with LibTorch (the default when PyTorch is installed). |
-
-Each is self-contained: the preprocessing is built into the model, so no
-other file has to travel with it (`CFM_sampler.onnx.data` is a leftover of
-the export and is not needed).
+This writes the model file `Source_ML` reads,
+`data_files/models/CFM_sampler.onnx`. It is self-contained: the preprocessing
+is built into the model, so no other file has to travel with it
+(`CFM_sampler.onnx.data` is a leftover of the export and is not needed).
 
 `--plot` draws `--n_samples` neutrons from the model and saves their
 correlation plot as `figures/CFM_neutron.png`. Look at it before moving on,
@@ -232,9 +225,8 @@ Notes:
   for it.
 - On macOS, if `mcrun` fails with a long list of `symbol(s) not found`
   errors, put `MCSTAS_CC_OVERRIDE=/usr/bin/clang` in front of the command.
-- To use the TorchScript model, copy `CFM_sampler.pt` instead and pass
-  `model_filename=CFM_sampler.pt`. The VAE works the same way with
-  `VAE_sampler.onnx` or `VAE_sampler.pt`.
+- For the VAE, copy `VAE_sampler.onnx` instead and pass
+  `model_filename=VAE_sampler.onnx`.
 - Instead of copying `Source_ML.comp`, you can point `mcrun` at this
   repository: `mcrun -I /path/to/mcpl_approximation/mcstas_comps ...`.
 
@@ -255,8 +247,8 @@ AT (0, 0, 0) ABSOLUTE
 - **Intensity.** The rays together carry the summed weight of the whole MCPL
   file, whatever `-n` is. When `--n_particles` is smaller than the file, the
   weights are scaled up to make up for the particles left out.
-- **Other parameters** (`backend`, `device`, `batch_size`, `verbose`) are
-  described in [`mcstas_comps/README.md`](mcstas_comps/README.md).
+- **Other parameters** (`device`, `batch_size`, `verbose`) are described in
+  [`mcstas_comps/README.md`](mcstas_comps/README.md).
 
 ## Benchmark
 
