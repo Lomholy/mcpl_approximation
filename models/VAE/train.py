@@ -37,7 +37,7 @@ def add_arguments():
     parser.add_argument(
         "--epochs",
         type=int,
-        default=100,
+        default=5,
         help="Number of passes over the training data",
     )
 
@@ -131,7 +131,7 @@ def train_vae(
 
         epoch_time = time.time()
 
-        if epoch % 5 == 0:
+        if epoch % 5 == 0 or epoch == epochs - 1:
             vae.eval()
             ema.eval()
             train_losses.append(loss.item())

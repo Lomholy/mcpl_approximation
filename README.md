@@ -122,7 +122,7 @@ below use the CFM, and the table shows what to swap for the VAE.
 | | CFM | VAE |
 | --- | --- | --- |
 | Folder | `models/CFM` | `models/VAE` |
-| Training time on a laptop CPU | a few minutes | about 3 hours |
+| Training time on a laptop CPU | a few minutes | about 10 minutes |
 | Checkpoint | `data_files/models/CFM.pth` | `data_files/models/vae.pth` |
 | Exported models | `CFM_sampler.onnx`, `CFM_sampler.pt` | `VAE_sampler.onnx`, `VAE_sampler.pt` |
 | Check plot | `figures/CFM_neutron.png` | `figures/VAE_neutron.png` |
@@ -140,7 +140,7 @@ python train.py --input_mcpl ../../data_files/mcpl_files/my_source.mcpl.gz
 | `--input_mcpl` | `../../data_files/mcpl_files/ODIN.mcpl.gz` | The MCPL file to learn from. |
 | `--n_particles` | `1e6` | Number of particles read from the file. |
 | `--device` | `cpu` | `cpu` works everywhere; `mps` is for Apple Silicon, `cuda` for NVIDIA GPUs. |
-| `--epochs` | `100` | VAE only: passes over the training data. Fewer is faster and less accurate. |
+| `--epochs` | `5` | VAE only: passes over the training data. More is slower and more accurate. |
 
 Training prints the training and validation loss as it goes and writes the
 checkpoint, plus the preprocessing table
