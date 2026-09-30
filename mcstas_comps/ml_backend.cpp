@@ -8,10 +8,8 @@
 
 #include "onnxruntime/core/session/onnxruntime_c_api.h"
 
-#ifdef ML_BACKEND_HAVE_TORCH
 #include <torch/script.h>
 #include <torch/torch.h>
-#endif
 
 namespace {
 
@@ -263,10 +261,8 @@ void onnx_free(OnnxState& st)
 }
 
 // ============================================================================
-// LibTorch backend (optional -- see CMakeLists.txt's WITH_TORCH option)
+// LibTorch backend (mandatory)
 // ============================================================================
-
-#ifdef ML_BACKEND_HAVE_TORCH
 
 struct TorchState {
     torch::jit::script::Module module;
@@ -363,8 +359,6 @@ int torch_run(TorchState& st, const float* input, int batch, int dim, float* out
     return 0;
 }
 
-#endif  // ML_BACKEND_HAVE_TORCH
-
 }  // namespace
 
 // ============================================================================
@@ -380,9 +374,7 @@ struct MLModelHandle {
     float* noise;
 
     OnnxState onnx;
-#ifdef ML_BACKEND_HAVE_TORCH
     TorchState torch_state;
-#endif
 };
 
 extern "C" {
@@ -418,18 +410,7 @@ MLModelHandle* ml_load_model(const char* path, MLBackend backend, const char* de
         ok = onnx_load(handle->onnx, path, device, verbose, gpu_verbose, batch_size, dim,
                         handle->noise, n_training_samples);
     } else {
-#ifdef ML_BACKEND_HAVE_TORCH
         ok = torch_load(handle->torch_state, path, device, verbose, n_training_samples);
-#else
-        fprintf(stderr,
-                "Warning: '%s' looks like a PyTorch/TorchScript model, but this build of "
-                "libmlbackend was compiled without LibTorch support (PyTorch/LibTorch was "
-                "not found when the library was built). Install PyTorch and reconfigure/"
-                "rebuild libmlbackend (CMake auto-detects torch.utils.cmake_prefix_path) to "
-                "use TorchScript models with Source_ML.\n",
-                path);
-        ok = false;
-#endif
     }
 
     if (!ok) {
@@ -458,13 +439,7 @@ int ml_generate_neutron(MLModelHandle* handle, void* rng_state, float* output)
     if (handle->backend == ML_BACKEND_ONNX) {
         rc = onnx_run(handle->onnx, output, handle->batch_size, handle->dim);
     } else {
-#ifdef ML_BACKEND_HAVE_TORCH
         rc = torch_run(handle->torch_state, handle->noise, handle->batch_size, handle->dim, output);
-#else
-        // Unreachable: ml_load_model() never returns a handle with
-        // backend == ML_BACKEND_TORCH when built without LibTorch support.
-        rc = 5;
-#endif
     }
     if (handle->verbose && rc == 0) {
         printf("Model Run: %.3f s\n", ml_walltime() - r0);

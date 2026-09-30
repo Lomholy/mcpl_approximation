@@ -127,9 +127,7 @@ def micromamba(env_name, args):
 
 def ensure_mlbackend_built(env_name, cc_override):
     """Build+install libmlbackend into the active env if it isn't there yet,
-    following mcstas_comps/README.md. Forces -DWITH_TORCH=ON since
-    this benchmark exercises both backends and needs TorchScript support
-    compiled in, not just the ONNX-only default fallback."""
+    following mcstas_comps/README.md."""
     prefix = subprocess.run(
         micromamba(env_name, ["printenv", "CONDA_PREFIX"]),
         capture_output=True, text=True, check=True,
@@ -150,7 +148,6 @@ def ensure_mlbackend_built(env_name, cc_override):
             "cmake",
             f"-DCMAKE_PREFIX_PATH={torch_cmake}",
             f"-DCMAKE_INSTALL_PREFIX={prefix}",
-            "-DWITH_TORCH=ON",
             "..",
         ]),
         cwd=build_dir,

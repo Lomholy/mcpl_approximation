@@ -26,10 +26,10 @@ so `Source_ML`'s output is already physical-space. There is nothing like a
   `"cpu"` can be forced for ONNX and `"cuda"`/`"mps"`/`"cpu"` for
   TorchScript), `batch_size`, `verbose`, `GPU_verbose`.
 - `ml_backend.h` / `ml_backend.cpp` -- the unified C-linkage bridge. ONNX
-  Runtime is a mandatory dependency; LibTorch is optional (see below).
+  Runtime and LibTorch are both mandatory dependencies.
 - `CMakeLists.txt` -- builds `ml_backend.cpp` into `libmlbackend` and
-  installs it (with its header) into the active environment; auto-detects
-  LibTorch via `WITH_TORCH` (`AUTO`/`ON`/`OFF`). Also builds `c_smoke_test`,
+  installs it (with its header) into the active environment. Also builds
+  `c_smoke_test`,
   a pure-C sanity check of the library, independent of McStas.
 - `Makefile` -- thin wrapper so `make` / `make install` do the usual
   out-of-source CMake build/install dance in one command (see below).
@@ -64,12 +64,8 @@ mamba activate mcpl_torch
 `environment.yml` installs `onnxruntime-cpp` (the C API headers/lib that
 `libmlbackend` needs -- plain `onnxruntime` from conda-forge only ships the
 Python bindings) and `pytorch-cpu` (which ships LibTorch's headers/libs and
-`torch.utils.cmake_prefix_path`). **LibTorch is optional for `libmlbackend`
-itself** -- if you only care about the ONNX backend, you can build in an
-environment without `pytorch-cpu` at all; `libmlbackend` will build fine and
-`Source_ML` will work for `.onnx` models. Pointing it at a `.pt`/`.pth` file
-in that case fails at `INITIALIZE` with a message telling you to install
-PyTorch and rebuild, not a crash.
+`torch.utils.cmake_prefix_path`). `libmlbackend` needs both, so `Source_ML`
+always supports `.onnx` and `.pt`/`.pth` models.
 
 ## Build and install the library
 
@@ -85,17 +81,9 @@ cd mcstas_comps
 make install
 ```
 
-This picks up `$CONDA_PREFIX` as the install prefix automatically, and
-auto-detects LibTorch (`WITH_TORCH=AUTO`, the default): if `pytorch-cpu` is
-installed, the build includes TorchScript support; otherwise it silently
-builds ONNX-only (check the build output for `libmlbackend: LibTorch found`
-vs. `not found` to see which happened). To require or forbid TorchScript
-support explicitly:
-
-```bash
-make WITH_TORCH=ON install    # fail if LibTorch isn't found, instead of silently building ONNX-only
-make WITH_TORCH=OFF install   # ONNX-only, even if LibTorch is installed
-```
+This picks up `$CONDA_PREFIX` as the install prefix automatically and finds
+LibTorch through the PyTorch in the active environment. Configure fails
+with `LibTorch not found` if PyTorch is not installed there.
 
 If your system's compiler toolchain is newer than the one conda-forge's
 `cxx-compiler`/`c-compiler` packages bundle (macOS with a recent Xcode
@@ -107,12 +95,9 @@ file`), build with the system compiler instead:
 CC=/usr/bin/clang CXX=/usr/bin/clang++ make install
 ```
 
-(Every `make` target above also works without `install`, e.g. plain `make`
-just builds into `build/` without touching `$CONDA_PREFIX`; `make clean`
-removes `build/`. See the `Makefile` itself, or run the underlying CMake
-commands directly, if you need more control -- e.g. a second build
-directory to compare `WITH_TORCH=ON` vs `OFF` side by side, which this
-wrapper doesn't try to support.)
+(Plain `make` just builds into `build/` without touching `$CONDA_PREFIX`;
+`make clean` removes `build/`. See the `Makefile` itself, or run the
+underlying CMake commands directly, if you need more control.)
 
 Optionally sanity-check the library on its own, independent of McStas:
 
@@ -127,7 +112,7 @@ DYLD_LIBRARY_PATH="$CONDA_PREFIX/lib:build" ./build/c_smoke_test ./CFM_sampler.p
 
 ```bash
 python export_onnx_smoke.py    # writes CFM_sampler.onnx
-python export_torch_smoke.py   # writes CFM_sampler.pt (only useful with a Torch-enabled libmlbackend)
+python export_torch_smoke.py   # writes CFM_sampler.pt
 ```
 
 Both scripts call `make_smoke_transformer.write_smoke_transformer()`

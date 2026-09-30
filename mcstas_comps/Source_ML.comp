@@ -17,11 +17,8 @@
 * former separate Source_ML (ONNX-only) and Source_ML_torch (TorchScript-only)
 * components: this one component dispatches to whichever backend
 * `ML_filename` needs, via libmlbackend (ml_backend.h/.cpp in this
-* directory). LibTorch support in libmlbackend is optional (see README.md);
-* onnxruntime-cpp is the only dependency this component's DEPENDENCY line
-* requires unconditionally. Pointing this component at a .pt/.pth file when
-* libmlbackend was built without LibTorch produces a clear error message at
-* INITIALIZE, not a crash or a build failure.
+* directory), which is built with both ONNX Runtime and LibTorch (see
+* README.md).
 *
 * The inverse Gaussian-rank transform is embedded in the exported model
 * graph itself (see ../utils/data_load.py: InverseGaussRankTransform /
@@ -80,8 +77,7 @@ SETTING PARAMETERS (string ML_filename="",
                     verbose=0, GPU_verbose = 0
                    )
 
-/* libmlbackend (and, if it was built with TorchScript support, the LibTorch
- * it links) is expected installed into the active environment, e.g. via
+/* libmlbackend (and the LibTorch it links) is expected installed into the active environment, e.g. via
  * `cmake --install` into $CONDA_PREFIX -- see README.md. Note: mcrun does
  * NOT shell-expand DEPENDENCY strings (they are passed straight into the
  * compiler's argv), so a literal "$CONDA_PREFIX/lib" here would not resolve;

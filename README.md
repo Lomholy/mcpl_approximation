@@ -20,8 +20,7 @@ reading events from a static `.mcpl` file.
   plotting correlations (`plotting.py`, `plot_model_correlations.py`,
   `plot_mcpl.py`), and reference distributions (`true_correlations.py`).
 - `mcstas_comps` — the `Source_ML` McStas component (backed by
-  `libmlbackend`, a C++ library supporting both ONNX Runtime and, optionally,
-  LibTorch) and its C/Python test harness; see
+  `libmlbackend`, a C++ library supporting both ONNX Runtime and LibTorch) and its C/Python test harness; see
   [its README](mcstas_comps/README.md) for the build/run steps.
 - `benchmarking/` — `pipeline_benchmark.py` runs the full
   train → eval/export → McStas end-to-end for both models and both backends
@@ -42,13 +41,11 @@ mamba env create -f environment.yml
 mamba activate mcpl_torch
 ```
 
-This installs Python 3.11, CPU PyTorch, ONNX/ONNX Runtime (including
-`onnxruntime-cpp`'s C API, the one dependency `mcstas_comps/libmlbackend`
-requires unconditionally), McStas and
-McStasScript, MCPL's Python bindings, and a C/C++ compiler toolchain plus
-CMake for building `libmlbackend`. PyTorch/LibTorch is optional for
-`libmlbackend` itself -- it's auto-detected at build time, and a build
-without it still works fully for ONNX models (see
+This installs Python 3.11, CPU PyTorch (which ships LibTorch), ONNX/ONNX
+Runtime (including `onnxruntime-cpp`'s C API), McStas and McStasScript,
+MCPL's Python bindings, and a C/C++ compiler toolchain plus CMake for
+building `libmlbackend`. `libmlbackend` is built against both ONNX Runtime
+and LibTorch, so `Source_ML` reads ONNX and TorchScript models alike (see
 [`mcstas_comps/README.md`](mcstas_comps/README.md)).
 
 Before running an instrument, `libmlbackend` needs a one-time CMake build
@@ -76,7 +73,8 @@ your instrument.
 ### 2. Build the component's library (once)
 
 `Source_ML` calls into a small library, `libmlbackend`, that has to be
-installed into the environment:
+installed into the environment. It supports both ONNX and TorchScript
+models:
 
 ```bash
 cd mcstas_comps
@@ -162,8 +160,8 @@ This writes the two files `Source_ML` can read, both into
 
 | File | Backend |
 | --- | --- |
-| `CFM_sampler.onnx` | ONNX Runtime. Always available. |
-| `CFM_sampler.pt` | TorchScript. Needs `libmlbackend` built with LibTorch (the default when PyTorch is installed). |
+| `CFM_sampler.onnx` | ONNX Runtime |
+| `CFM_sampler.pt` | TorchScript |
 
 Each is self-contained: the preprocessing is built into the model, so no
 other file has to travel with it (`CFM_sampler.onnx.data` is a leftover of

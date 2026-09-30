@@ -1,6 +1,6 @@
 #pragma once
 
-/* Unified C-linkage bridge to both ONNX Runtime and (optionally) LibTorch,
+/* Unified C-linkage bridge to both ONNX Runtime and LibTorch,
  * so a single McStas component (compiled as C) can load and sample from
  * either kind of exported model without ever seeing a backend-specific
  * type. Supersedes the separate onnx_implementation/Source_ML.comp (which
@@ -8,11 +8,7 @@
  * (which bridged LibTorch's C++-only API) with one library that does both,
  * dispatching on a resolved MLBackend.
  *
- * ONNX Runtime is a mandatory dependency of this library. LibTorch is
- * optional at build time (see CMakeLists.txt's WITH_TORCH option): a build
- * without it still provides every symbol below, but ml_load_model() returns
- * NULL (after printing an explanatory warning) for any model that resolves
- * to ML_BACKEND_TORCH.
+ * ONNX Runtime and LibTorch are both mandatory dependencies of this library.
  *
  * The inverse Gaussian-rank transform is embedded in the exported model
  * graph itself (see ../utils/data_load.py: InverseGaussRankTransform /
@@ -78,10 +74,7 @@ typedef double (*MLRandNormFn)(void* rng_state);
  * utils/data_load.py) into `*n_training_samples` (0 if absent). May be
  * NULL.
  *
- * Returns NULL on failure, having already printed a diagnostic -- including
- * when `path` resolves to ML_BACKEND_TORCH but this build of the library
- * was compiled without LibTorch support, in which case the diagnostic
- * explains that and how to rebuild with it. */
+ * Returns NULL on failure, having already printed a diagnostic. */
 MLModelHandle* ml_load_model(const char* path, MLBackend backend, const char* device,
                               int verbose, int gpu_verbose, int batch_size, int dim,
                               MLRandNormFn randnorm_fn, long* n_training_samples);
