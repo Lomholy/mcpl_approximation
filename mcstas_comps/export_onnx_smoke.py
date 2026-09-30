@@ -23,11 +23,13 @@ if __name__ == "__main__":
     if os.path.exists(checkpoint_path):
         ckpt = torch.load(checkpoint_path, map_location=device)
         velocity.load_state_dict(ckpt["state_dict"])
+        n_training_samples = ckpt.get("n_training_samples", 1_000_000)
     else:
         print(
             f"⚠️  No trained checkpoint found at {checkpoint_path}; "
             "exporting an untrained model for pipeline smoke-testing only."
         )
+        n_training_samples = 1_000_000
 
     transformer_path = "../data_files/preprocess/gaussian_transformer.bin"
     if not os.path.exists(transformer_path):
@@ -46,6 +48,7 @@ if __name__ == "__main__":
         onnx_path,
         device=device,
         transformer_file_path=transformer_path,
+        n_training_samples=n_training_samples,
     )
 
     print(f"wrote {onnx_path}")

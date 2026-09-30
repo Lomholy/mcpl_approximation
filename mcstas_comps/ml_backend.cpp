@@ -8,10 +8,8 @@
 
 #include "onnxruntime/core/session/onnxruntime_c_api.h"
 
-#ifdef ML_BACKEND_HAVE_TORCH
 #include <torch/script.h>
 #include <torch/torch.h>
-#endif
 
 namespace {
 
@@ -263,10 +261,8 @@ void onnx_free(OnnxState& st)
 }
 
 // ============================================================================
-// LibTorch backend (optional -- see CMakeLists.txt's WITH_TORCH option)
+// LibTorch backend (mandatory)
 // ============================================================================
-
-#ifdef ML_BACKEND_HAVE_TORCH
 
 struct TorchState {
     torch::jit::script::Module module;
@@ -275,26 +271,44 @@ struct TorchState {
     TorchState() : device(torch::kCPU) {}
 };
 
-torch::Device pick_torch_device()
+// "auto" picks CUDA when available and CPU otherwise. MPS is only used when
+// asked for by name.
+torch::Device pick_torch_device(const char* device, int verbose)
 {
-    if (torch::cuda::is_available()) {
-        return torch::Device(torch::kCUDA);
-    }
+    const char* name = (device != NULL && device[0] != '\0') ? device : "auto";
+
+    if (strcmp(name, "auto") == 0 || strcmp(name, "cuda") == 0) {
+        if (torch::cuda::is_available()) {
+            if (verbose) printf("ml_backend (torch): using cuda\n");
+            return torch::Device(torch::kCUDA);
+        }
+        if (strcmp(name, "cuda") == 0) {
+            fprintf(stderr, "ml_backend (torch): requested device 'cuda' unavailable; falling back to CPU\n");
+        }
+    } else if (strcmp(name, "mps") == 0) {
 #ifdef __APPLE__
-    if (torch::hasMPS()) {
-        return torch::Device(torch::kMPS);
-    }
+        if (torch::hasMPS()) {
+            if (verbose) printf("ml_backend (torch): using mps\n");
+            return torch::Device(torch::kMPS);
+        }
 #endif
+        fprintf(stderr, "ml_backend (torch): requested device 'mps' unavailable; falling back to CPU\n");
+    } else if (strcmp(name, "cpu") != 0) {
+        fprintf(stderr, "ml_backend (torch): unknown device '%s'; falling back to CPU\n", name);
+    }
+
+    if (verbose) printf("ml_backend (torch): using cpu\n");
     return torch::Device(torch::kCPU);
 }
 
-bool torch_load(TorchState& st, const char* path, long* n_training_samples)
+bool torch_load(TorchState& st, const char* path, const char* device, int verbose,
+                long* n_training_samples)
 {
     try {
         torch::jit::ExtraFilesMap extra_files;
         extra_files["n_training_samples"] = "";
 
-        st.device = pick_torch_device();
+        st.device = pick_torch_device(device, verbose);
         st.module = torch::jit::load(path, st.device, extra_files);
         st.module.eval();
 
@@ -345,8 +359,6 @@ int torch_run(TorchState& st, const float* input, int batch, int dim, float* out
     return 0;
 }
 
-#endif  // ML_BACKEND_HAVE_TORCH
-
 }  // namespace
 
 // ============================================================================
@@ -362,9 +374,7 @@ struct MLModelHandle {
     float* noise;
 
     OnnxState onnx;
-#ifdef ML_BACKEND_HAVE_TORCH
     TorchState torch_state;
-#endif
 };
 
 extern "C" {
@@ -400,18 +410,7 @@ MLModelHandle* ml_load_model(const char* path, MLBackend backend, const char* de
         ok = onnx_load(handle->onnx, path, device, verbose, gpu_verbose, batch_size, dim,
                         handle->noise, n_training_samples);
     } else {
-#ifdef ML_BACKEND_HAVE_TORCH
-        ok = torch_load(handle->torch_state, path, n_training_samples);
-#else
-        fprintf(stderr,
-                "Warning: '%s' looks like a PyTorch/TorchScript model, but this build of "
-                "libmlbackend was compiled without LibTorch support (PyTorch/LibTorch was "
-                "not found when the library was built). Install PyTorch and reconfigure/"
-                "rebuild libmlbackend (CMake auto-detects torch.utils.cmake_prefix_path) to "
-                "use TorchScript models with Source_ML.\n",
-                path);
-        ok = false;
-#endif
+        ok = torch_load(handle->torch_state, path, device, verbose, n_training_samples);
     }
 
     if (!ok) {
@@ -440,13 +439,7 @@ int ml_generate_neutron(MLModelHandle* handle, void* rng_state, float* output)
     if (handle->backend == ML_BACKEND_ONNX) {
         rc = onnx_run(handle->onnx, output, handle->batch_size, handle->dim);
     } else {
-#ifdef ML_BACKEND_HAVE_TORCH
         rc = torch_run(handle->torch_state, handle->noise, handle->batch_size, handle->dim, output);
-#else
-        // Unreachable: ml_load_model() never returns a handle with
-        // backend == ML_BACKEND_TORCH when built without LibTorch support.
-        rc = 5;
-#endif
     }
     if (handle->verbose && rc == 0) {
         printf("Model Run: %.3f s\n", ml_walltime() - r0);

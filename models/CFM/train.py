@@ -18,7 +18,7 @@ import copy
 def add_arguments(parser):
     parser.add_argument("--n_particles", default=1e6)
     parser.add_argument("--model_filename", default="../../data_files/models/CFM.pth")
-    parser.add_argument("--device", default="mps")
+    parser.add_argument("--device", default="cpu")
     parser.add_argument("--input_mcpl", type=str, default= "../../data_files/mcpl_files/ODIN.mcpl.gz")
     parser.add_argument("--max_grid_samples", type=int, default=1_000_000)
 
@@ -78,7 +78,7 @@ def train(
         model,
         dataset,
         filename,
-        device="mps",
+        device="cpu",
         steps=10_000,
         lr=1e-3,
         val_size=100000,
@@ -89,6 +89,7 @@ def train(
 
     losses = []
     val_losses = []
+    n_training_samples = dataset.shape[0]
     # Prepare validation step
     perm = torch.randperm(dataset.shape[0])
     val = dataset[perm[:val_size]].to(device)
@@ -134,6 +135,7 @@ def train(
                         "state_dict": ema.state_dict(),
                         "step": step,
                         "val_loss": best_val_loss,
+                        "n_training_samples": n_training_samples,
                     },
                     filename,
                 )
@@ -151,7 +153,7 @@ add_arguments(parser)
 args = parser.parse_args()
 input_mcpl = args.input_mcpl
 
-data = load_mcpl_file(input_mcpl, int(args.n_particles))
+data = load_mcpl_file(input_mcpl, int(args.n_particles), rescale_weights=True)
 data = torch.asarray(
     transform(
         data,
@@ -166,7 +168,7 @@ device = args.device
 
 model = VelocityField().to(device)
 
-losses, val_losses = train(model, data, args.model_filename)
+losses, val_losses = train(model, data, args.model_filename, device=device)
 
 np.save("../../data_files/losses/cfm_train.npy", np.array(losses))
 np.save("../../data_files/losses/cfm_val.npy", np.array(val_losses))

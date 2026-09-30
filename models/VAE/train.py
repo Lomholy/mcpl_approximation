@@ -28,9 +28,23 @@ def add_arguments():
     )
 
     parser.add_argument(
+        "--input_mcpl",
+        type=str,
+        default="../../data_files/mcpl_files/ODIN.mcpl.gz",
+        help="MCPL file to train on",
+    )
+
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=5,
+        help="Number of passes over the training data",
+    )
+
+    parser.add_argument(
         "--device",
         type=str,
-        default="mps",
+        default="cpu",
         help="Device to use (e.g., cpu, mps or cuda)",
     )
     return parser
@@ -86,7 +100,13 @@ def update_ema(ema, model, decay=0.999):
 
 
 def train_vae(
-    train_loader, val_loader, epochs, kl_weight, device, filename="../../data_files/models/vae.pth"
+    train_loader,
+    val_loader,
+    epochs,
+    kl_weight,
+    device,
+    n_training_samples,
+    filename="../../data_files/models/vae.pth",
 ):
     start = time.time()
     train_losses = []
@@ -111,7 +131,7 @@ def train_vae(
 
         epoch_time = time.time()
 
-        if epoch % 5 == 0:
+        if epoch % 5 == 0 or epoch == epochs - 1:
             vae.eval()
             ema.eval()
             train_losses.append(loss.item())
@@ -139,6 +159,7 @@ def train_vae(
                     "state_dict": ema.state_dict(),
                     "step": epoch,
                     "val_loss": val_losses,
+                    "n_training_samples": n_training_samples,
                 },
                 filename,
             )
@@ -158,9 +179,9 @@ if __name__ == "__main__":
 
     batch_size = 1024
     kl_weight = 0.6
-    epochs = 100
+    epochs = args.epochs
 
-    data = load_mcpl_file("../../data_files/mcpl_files/ODIN.mcpl.gz", n_particles)
+    data = load_mcpl_file(args.input_mcpl, n_particles, rescale_weights=True)
     data = torch.asarray(transform(data, file_path="../../data_files/preprocess/gaussian_transformer.bin"), dtype=torch.float32)
 
     dataset = TensorDataset(data)
@@ -174,7 +195,7 @@ if __name__ == "__main__":
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
 
     vae, train_losses, val_losses = train_vae(
-        train_loader, val_loader, epochs, kl_weight, device=device
+        train_loader, val_loader, epochs, kl_weight, device=device, n_training_samples=len(dataset)
     )
     np.save("../../data_files/losses/vae_train.npy", train_losses)
     np.save("../../data_files/losses/vae_val.npy", val_losses)

@@ -127,9 +127,7 @@ def micromamba(env_name, args):
 
 def ensure_mlbackend_built(env_name, cc_override):
     """Build+install libmlbackend into the active env if it isn't there yet,
-    following mcstas_comps/README.md. Forces -DWITH_TORCH=ON since
-    this benchmark exercises both backends and needs TorchScript support
-    compiled in, not just the ONNX-only default fallback."""
+    following mcstas_comps/README.md."""
     prefix = subprocess.run(
         micromamba(env_name, ["printenv", "CONDA_PREFIX"]),
         capture_output=True, text=True, check=True,
@@ -150,7 +148,6 @@ def ensure_mlbackend_built(env_name, cc_override):
             "cmake",
             f"-DCMAKE_PREFIX_PATH={torch_cmake}",
             f"-DCMAKE_INSTALL_PREFIX={prefix}",
-            "-DWITH_TORCH=ON",
             "..",
         ]),
         cwd=build_dir,
@@ -253,7 +250,7 @@ def main():
     parser.add_argument("--env", default="mcpl_torch", help="micromamba environment name.")
     parser.add_argument("--cc-override", default="/usr/bin/clang",
                          help="Value for MCSTAS_CC_OVERRIDE / CC when building the torch wrapper.")
-    parser.add_argument("--device", default="mps", help="Device passed to train.py/eval.py.")
+    parser.add_argument("--device", default="cpu", help="Device passed to train.py/eval.py.")
     parser.add_argument("--n-particles", type=float, default=None,
                          help="Override --n_particles passed to each model's train.py (default: script's own default).")
     parser.add_argument("--n-eval-samples", type=int, default=200_000,
