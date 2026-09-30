@@ -60,7 +60,8 @@ known macOS compiler-toolchain caveats.
 
 This guide starts with an MCPL file and ends with a McStas instrument, in a
 folder of your own, that samples neutrons from a model trained on that file.
-It uses the CFM model. All commands assume a fresh clone of this repository.
+It works for both models, CFM and VAE. All commands assume a fresh clone of
+this repository.
 
 ### 1. Set up the environment (once)
 
@@ -107,7 +108,7 @@ cp /path/to/my_source.mcpl.gz data_files/mcpl_files/
 ```
 
 `mcpltool` shows how many particles the file holds and where they were
-recorded (you need the `z[cm]` column in step 7):
+recorded (you need the `z[cm]` column in step 6):
 
 ```bash
 mcpltool -l3 data_files/mcpl_files/my_source.mcpl.gz
@@ -115,31 +116,44 @@ mcpltool -l3 data_files/mcpl_files/my_source.mcpl.gz
 
 ### 4. Train the model
 
-The scripts use paths relative to their own folder, so run them from
-`models/CFM`:
+Pick one of the two models. The steps are the same for both; the commands
+below use the CFM, and the table shows what to swap for the VAE.
+
+| | CFM | VAE |
+| --- | --- | --- |
+| Folder | `models/CFM` | `models/VAE` |
+| Training time on a laptop CPU | a few minutes | about 3 hours |
+| Checkpoint | `data_files/models/CFM.pth` | `data_files/models/vae.pth` |
+| Exported models | `CFM_sampler.onnx`, `CFM_sampler.pt` | `VAE_sampler.onnx`, `VAE_sampler.pt` |
+| Check plot | `figures/CFM_neutron.png` | `figures/VAE_neutron.png` |
+
+The scripts use paths relative to their own folder, so run them from the
+model's folder:
 
 ```bash
 cd models/CFM
-python train.py --input_mcpl ../../data_files/mcpl_files/my_source.mcpl.gz --device cpu
+python train.py --input_mcpl ../../data_files/mcpl_files/my_source.mcpl.gz
 ```
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--input_mcpl` | `../../data_files/mcpl_files/ODIN.mcpl.gz` | The MCPL file to learn from. |
 | `--n_particles` | `1e6` | Number of particles read from the file. |
-| `--device` | `mps` | `cpu` works everywhere; `mps` is for Apple Silicon, `cuda` for NVIDIA GPUs. |
+| `--device` | `cpu` | `cpu` works everywhere; `mps` is for Apple Silicon, `cuda` for NVIDIA GPUs. |
+| `--epochs` | `100` | VAE only: passes over the training data. Fewer is faster and less accurate. |
 
-Training runs 10 000 steps (a few minutes on a laptop CPU) and prints the
-training and validation loss every 1000 steps. It writes the checkpoint
-`data_files/models/CFM.pth` and the preprocessing table
-`data_files/preprocess/gaussian_transformer.bin`.
+Training prints the training and validation loss as it goes and writes the
+checkpoint, plus the preprocessing table
+`data_files/preprocess/gaussian_transformer.bin`. Both models write that
+same table, so export a model (step 5) before training again on another MCPL
+file.
 
 ### 5. Export the model
 
-Still in `models/CFM`:
+Still in the model's folder:
 
 ```bash
-python eval.py --device cpu --n_samples 100000 --plot
+python eval.py --n_samples 100000 --plot
 cd ../..
 ```
 
@@ -219,7 +233,8 @@ Notes:
 - On macOS, if `mcrun` fails with a long list of `symbol(s) not found`
   errors, put `MCSTAS_CC_OVERRIDE=/usr/bin/clang` in front of the command.
 - To use the TorchScript model, copy `CFM_sampler.pt` instead and pass
-  `model_filename=CFM_sampler.pt`.
+  `model_filename=CFM_sampler.pt`. The VAE works the same way with
+  `VAE_sampler.onnx` or `VAE_sampler.pt`.
 - Instead of copying `Source_ML.comp`, you can point `mcrun` at this
   repository: `mcrun -I /path/to/mcpl_approximation/mcstas_comps ...`.
 
@@ -237,9 +252,9 @@ AT (0, 0, 0) ABSOLUTE
   the MCPL file, relative to `Source_ML`. Place `Source_ML` at the origin of
   the instrument that wrote the MCPL file, and place everything else
   downstream of the recorded `z`.
-- **Intensity.** The weights match the MCPL file only when `-n` equals the
-  number of training particles (`1e6`). The exported model always records
-  that number as `1e6`, so keep `--n_particles` at its default.
+- **Intensity.** The rays together carry the summed weight of the whole MCPL
+  file, whatever `-n` is. When `--n_particles` is smaller than the file, the
+  weights are scaled up to make up for the particles left out.
 - **Other parameters** (`backend`, `device`, `batch_size`, `verbose`) are
   described in [`mcstas_comps/README.md`](mcstas_comps/README.md).
 
