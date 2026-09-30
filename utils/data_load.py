@@ -9,7 +9,11 @@ import onnx
 
 
 def load_mcpl_file(
-    filepath: str, n_particles: int = 0, offset: int = 0, print_status: bool = False
+    filepath: str,
+    n_particles: int = 0,
+    offset: int = 0,
+    print_status: bool = False,
+    rescale_weights: bool = False,
 ):
     mcplfile = mcpl.MCPLFile(filepath)
     max_p = mcplfile.nparticles
@@ -41,6 +45,9 @@ def load_mcpl_file(
         if j >= n_particles + offset:
             break
     data = torch.tensor(data, dtype=torch.float32)
+    if rescale_weights:
+        # Let the loaded subset carry the summed weight of the whole file
+        data[:, 0] *= max_p / n_particles
     return data
 
 
@@ -377,6 +384,7 @@ def export_model_as_onnx(
     onnx_path: str,
     device: str,
     transformer_file_path: str = "",
+    n_training_samples: int = 1_000_000,
 ):
     input_model = input_model.to(device=device)
     if transformer_file_path:
@@ -407,7 +415,7 @@ def export_model_as_onnx(
     meta1.value = "Daniel Lomholt Christensen"
     meta2 = onnx.StringStringEntryProto()
     meta2.key = "n_training_samples"
-    meta2.value = str(1000000)
+    meta2.value = str(n_training_samples)
     model.metadata_props.extend([meta1, meta2])
     onnx.save_model(
         model,

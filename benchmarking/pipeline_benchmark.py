@@ -253,7 +253,7 @@ def main():
     parser.add_argument("--env", default="mcpl_torch", help="micromamba environment name.")
     parser.add_argument("--cc-override", default="/usr/bin/clang",
                          help="Value for MCSTAS_CC_OVERRIDE / CC when building the torch wrapper.")
-    parser.add_argument("--device", default="mps", help="Device passed to train.py/eval.py.")
+    parser.add_argument("--device", default="cpu", help="Device passed to train.py/eval.py.")
     parser.add_argument("--n-particles", type=float, default=None,
                          help="Override --n_particles passed to each model's train.py (default: script's own default).")
     parser.add_argument("--n-eval-samples", type=int, default=200_000,

@@ -162,7 +162,7 @@ INITIALIZE
     output = (float*) malloc(batch_size * dim * sizeof(float));
     if (verbose) printf("Arrays allocated successfully. INITIALIZE finished!\n");
 
-    weight_norm = (n_training_samples > 0) ? mcget_ncount() / (double)n_training_samples : 1.0;
+    weight_norm = (n_training_samples > 0) ? (double)n_training_samples / mcget_ncount() : 1.0;
     printf("Weight norm = %g\n", weight_norm);
 %}
 TRACE
