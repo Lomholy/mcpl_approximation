@@ -1,0 +1,98 @@
+/********************************************************************************
+*
+* Instrument icon_sample
+*
+* %Identification
+* Written by: Daniel Lomholt Christensen
+* Date: October 2026
+* Origin: UCPH @ NBI
+* %INSTRUMENT_SITE: Generated_instruments
+*
+* Benchmark instrument for the PSI_ICON MCPL file recorded just before the
+* sample position. The source is either the MCPL file (MCPL_input) or a
+* trained model (Source_ML), placed so the stored neutron coordinates are used
+* as-is. A Fresnel zone plate (FZP_simple) 1 mm downstream of the recording
+* plane focuses the beam, and the signal is recorded after it on a PSD flush
+* against the plate and on a PSD in the focal plane of the design wavelength.
+*
+* The focal length of the plate is f = 2 rad dr / lambda, with the outermost zone
+* width dr derived from the design focal length and wavelength. The plate
+* covers the whole beam, so the focal plane is sensitive to the position,
+* direction and wavelength of every neutron.
+*
+* %Parameters
+* run_from_mcpl: [str]  MCPL file used as source when use_ml is 0.
+* use_ml:        [1]    0: MCPL_input source, 1: Source_ML source.
+* run_ml:        [str]  Exported model used as source when use_ml is 1.
+* zp_rad:        [m]    Radius of the zone plate.
+* zp_eta:        [1]    Efficiency of the zone plate.
+* lambda_design: [AA]   Design wavelength of the zone plate.
+* focus_design:  [m]    Focal length at the design wavelength. The focal PSD sits here.
+*
+* %End
+********************************************************************************/
+
+DEFINE INSTRUMENT icon_sample (
+string run_from_mcpl = "../../data_files/mcpl_files/PSI_ICON.mcpl.gz",
+int use_ml = 0,
+string run_ml = "../../data_files/models/CFM_sampler.pt",
+zp_rad = 0.0105,
+zp_eta = 0.2,
+lambda_design = 6.0,
+focus_design = 1.0
+)
+
+DECLARE
+%{
+double z_file;
+double beam_y;
+double plate_gap;
+double zp_dr;
+double psd_gap;
+%}
+
+INITIALIZE
+%{
+z_file = -3.2148334;
+beam_y = 0.0075;
+plate_gap = 0.001;
+psd_gap = 0.001;
+zp_dr = focus_design * lambda_design * 1e-10 / (2 * zp_rad);
+printf("Zone plate outermost zone width: %g m\n", zp_dr);
+%}
+
+TRACE
+
+COMPONENT MCPL_source = MCPL_input(
+ filename = run_from_mcpl) WHEN (!use_ml)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT ml_src = Source_ML(
+ ML_filename = run_ml,
+ verbose = 0) WHEN (use_ml)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT plate_position = Arm()
+AT (0, beam_y, z_file + plate_gap) ABSOLUTE
+
+COMPONENT zone_plate = FZP_simple(
+ rad = zp_rad, dr = zp_dr, order = 1, eta = zp_eta)
+AT (0, 0, 0) RELATIVE plate_position
+
+COMPONENT PSD_after_plate = PSD_monitor(
+ nx = 200, ny = 200, filename = "psd_after_plate.dat",
+ xwidth = 0.04, yheight = 0.04,
+ restore_neutron = 1)
+AT (0, 0, psd_gap) RELATIVE plate_position
+
+COMPONENT PSD_focus = PSD_monitor(
+ nx = 200, ny = 200, filename = "psd_focus.dat",
+ xwidth = 0.02, yheight = 0.02,
+ restore_neutron = 1)
+AT (0, 0, focus_design) RELATIVE plate_position
+
+FINALLY
+%{
+%}
+
+END

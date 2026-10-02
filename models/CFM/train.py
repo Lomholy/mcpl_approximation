@@ -3,7 +3,7 @@ import os
 from model import VelocityField
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 sys.path.append("../../utils/")
-from data_load import load_mcpl_file, transform
+from data_load import load_mcpl_file, load_mcpl_file_random, transform
 import argparse
 from tqdm import tqdm
 import torch
@@ -19,6 +19,7 @@ def add_arguments(parser):
     parser.add_argument("--n_particles", default=1e6)
     parser.add_argument("--model_filename", default="../../data_files/models/CFM.pth")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--random_subset", action="store_true")
     parser.add_argument("--input_mcpl", type=str, default= "../../data_files/mcpl_files/ODIN.mcpl.gz")
     parser.add_argument("--max_grid_samples", type=int, default=1_000_000)
 
@@ -153,7 +154,10 @@ add_arguments(parser)
 args = parser.parse_args()
 input_mcpl = args.input_mcpl
 
-data = load_mcpl_file(input_mcpl, int(args.n_particles), rescale_weights=True)
+if args.random_subset:
+    data = load_mcpl_file_random(input_mcpl, int(args.n_particles), rescale_weights=True)
+else:
+    data = load_mcpl_file(input_mcpl, int(args.n_particles), rescale_weights=True)
 data = torch.asarray(
     transform(
         data,
