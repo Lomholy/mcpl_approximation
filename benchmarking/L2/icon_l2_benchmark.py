@@ -1,10 +1,12 @@
 """L2 benchmark of the PSI_ICON MCPL file and a trained model against a reference MCPL file.
 
 The reference is a second MCPL file recorded at the same plane with an
-independent random seed. icon_sample.instr is run with the reference to give a
-reference PSD. For each particle count n:
+independent random seed. The sample instrument (icon_resolution.instr by
+default, a mask with sharp edges and small features, or icon_sample.instr, a
+zone plate) is run with the reference to give a reference PSD. For each
+particle count n:
 
-- MCPL side: icon_sample.instr runs on a random subset of n neutrons of the
+- MCPL side: the instrument runs on a random subset of n neutrons of the
   original MCPL file, with weights rescaled by N_total / n.
 - ML side: the Source_ML component runs directly with ncount=n, so no MCPL file
   is written for the model.
@@ -15,6 +17,9 @@ side is the whole original file.
 Usage (from benchmarking/L2, with MCSTAS_CC_OVERRIDE and CONDA_PREFIX set as in
 mcstas_comps/README.md):
     python icon_l2_benchmark.py --ref-mcpl <reference mcpl> --out-dir ~/Desktop
+
+For the zone plate:
+    python icon_l2_benchmark.py ... --instrument icon_sample.instr --monitors psd_focus psd_after_plate
 """
 import argparse
 import json
@@ -40,18 +45,15 @@ sys.path.append(str(HERE))
 from data_load import load_mcpl_file_random  # noqa: E402
 from icon_psd_compare import compare, load_psd  # noqa: E402
 
-MONITORS = ["psd_focus", "psd_after_plate"]
-
-
 def make_ml_instr(src, dst):
-    """Write a copy of icon_sample.instr without the MCPL source, whose
+    """Write a copy of the sample instrument without the MCPL source, whose
     INITIALIZE would otherwise override ncount."""
     text = Path(src).read_text()
     text = re.sub(r"COMPONENT MCPL_source = MCPL_input\(.*?ABSOLUTE\n\n", "", text, flags=re.S)
     text = re.sub(r'string run_from_mcpl = ".*?",\n', "", text)
     text = re.sub(r"int use_ml = 0,\n", "", text)
     text = text.replace(" WHEN (use_ml)", "")
-    text = text.replace("icon_sample", "icon_sample_ml")
+    text = text.replace(Path(src).stem, Path(src).stem + "_ml")
     Path(dst).write_text(text)
 
 
@@ -94,6 +96,10 @@ def run(binary, n, outdir, params):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--ref-mcpl", required=True)
+    ap.add_argument("--instrument", default="icon_resolution.instr",
+                    help="Sample instrument in this directory")
+    ap.add_argument("--monitors", nargs="+", default=["psd_flush", "psd_far"],
+                    help="PSD monitors of the instrument to compare")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--work-dir", default=str(HERE / "icon_work"))
     ap.add_argument("--mcpl", default=str(REPO / "data_files/mcpl_files/PSI_ICON.mcpl.gz"))
@@ -104,6 +110,8 @@ if __name__ == "__main__":
     ap.add_argument("--skip-sizes-above", type=int, default=None,
                     help="Skip subset sizes above this value (the full file is still run)")
     args = ap.parse_args()
+    MONITORS = args.monitors
+    instrument = HERE / args.instrument
 
     work = Path(args.work_dir)
     work.mkdir(parents=True, exist_ok=True)
@@ -114,11 +122,12 @@ if __name__ == "__main__":
     print(f"Loaded {n_total} neutrons", flush=True)
 
     write_mcpl(full[:2000], str(work / "build_small"))
-    mcpl_bin = build(HERE / "icon_sample.instr", work / "mcpl_build",
+    mcpl_bin = build(instrument, work / "mcpl_build",
                      [f"run_from_mcpl={work}/build_small.mcpl.gz"])
-    make_ml_instr(HERE / "icon_sample.instr", work / "icon_sample_ml.instr")
+    ml_instr = work / f"{instrument.stem}_ml.instr"
+    make_ml_instr(instrument, ml_instr)
     ml_params = [f"run_ml={args.model}"]
-    ml_bin = build(work / "icon_sample_ml.instr", work / "ml_build", ml_params)
+    ml_bin = build(ml_instr, work / "ml_build", ml_params)
 
     ref_dir = work / "run_ref"
     print("reference run", run(mcpl_bin, 1, ref_dir, [f"run_from_mcpl={args.ref_mcpl}"]), flush=True)
@@ -199,5 +208,5 @@ if __name__ == "__main__":
     fig.tight_layout()
     fig.savefig(out_dir / "ICON_L2_loss_comparison.png", dpi=150)
 
-    compare(ref_dir, work / "run_mcpl_full", work / "run_ml_full", out_dir, "psd_focus")
-    compare(ref_dir, work / "run_mcpl_full", work / "run_ml_full", out_dir, "psd_after_plate")
+    for m in MONITORS:
+        compare(ref_dir, work / "run_mcpl_full", work / "run_ml_full", out_dir, m)

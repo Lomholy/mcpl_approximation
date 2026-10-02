@@ -38,16 +38,22 @@ which is much faster than the CPU. `icon_sample.instr` exposes it as
 
 ## Benchmark
 
-`icon_sample.instr` places the MCPL source (or `Source_ML`) before a Fresnel
-zone plate (`FZP_simple`) and records the signal after it, on a PSD flush
-against the plate and on a PSD in the focal plane of the design wavelength.
+`icon_resolution.instr` places the MCPL source (or `Source_ML`) before an
+opaque mask with sharp edges and small features: a Siemens star, line pairs
+with periods down to 0.1 mm, a square and a slanted edge, and slits and holes
+down to 50 um. The signal is recorded after the mask on a PSD flush against it
+and on a PSD 50 mm downstream, where the divergence of the beam blurs the
+edges. The header of the instrument describes the layout.
 
 ```
 cd benchmarking/L2
 python icon_l2_benchmark.py --ref-mcpl ../../data_files/mcpl_files/PSI_ICON_ref.mcpl.gz --out-dir <output dir>
 ```
 
-The benchmark runs the reference file through `icon_sample.instr`, then, for a
+`--instrument icon_sample.instr --monitors psd_focus psd_after_plate` runs the
+benchmark with a Fresnel zone plate (`FZP_simple`) as the sample instead.
+
+The benchmark runs the reference file through the sample instrument, then, for a
 range of particle counts n, runs a random subset of n neutrons of the original
 file (weights rescaled by N / n) and the `Source_ML` component with ncount = n.
 The loss is the sum of squared pixel differences to the reference PSD. The
