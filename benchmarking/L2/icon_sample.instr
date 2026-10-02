@@ -24,6 +24,7 @@
 * run_from_mcpl: [str]  MCPL file used as source when use_ml is 0.
 * use_ml:        [1]    0: MCPL_input source, 1: Source_ML source.
 * run_ml:        [str]  Exported model used as source when use_ml is 1.
+* ml_device:     [str]  Device Source_ML runs the model on, see Source_ML.comp.
 * zp_rad:        [m]    Radius of the zone plate.
 * zp_eta:        [1]    Efficiency of the zone plate.
 * lambda_design: [AA]   Design wavelength of the zone plate.
@@ -36,6 +37,7 @@ DEFINE INSTRUMENT icon_sample (
 string run_from_mcpl = "../../data_files/mcpl_files/PSI_ICON.mcpl.gz",
 int use_ml = 0,
 string run_ml = "../../data_files/models/CFM_sampler.pt",
+string ml_device = "auto",
 zp_rad = 0.0105,
 zp_eta = 0.2,
 lambda_design = 6.0,
@@ -69,6 +71,7 @@ AT (0, 0, 0) ABSOLUTE
 
 COMPONENT ml_src = Source_ML(
  ML_filename = run_ml,
+ device = ml_device,
  verbose = 0) WHEN (use_ml)
 AT (0, 0, 0) ABSOLUTE
 

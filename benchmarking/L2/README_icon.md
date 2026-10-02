@@ -32,9 +32,9 @@ python train.py --input_mcpl ../../data_files/mcpl_files/PSI_ICON.mcpl.gz --rand
 python eval.py
 ```
 
-Train on the CPU. On some PyTorch builds `torch.nn.functional.linear` returns
-wrong values on MPS, so weights trained there give garbage on the CPU, where
-`Source_ML` runs the model.
+`Source_ML` runs the model on CUDA or MPS when available (`device="auto"`),
+which is much faster than the CPU. `icon_sample.instr` exposes it as
+`ml_device`.
 
 ## Benchmark
 

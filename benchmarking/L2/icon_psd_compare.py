@@ -44,7 +44,7 @@ def plot_image(img, xylim, title, filename, cmap="viridis", symmetric=False, lab
     fig, ax = plt.subplots()
     vmax = np.abs(img).max() if symmetric else img.max()
     vmin = -vmax if symmetric else 0
-    im = ax.imshow(img, origin="lower", extent=[v * 100 for v in xylim], cmap=cmap, vmin=vmin, vmax=vmax)
+    im = ax.imshow(img, origin="lower", extent=xylim, cmap=cmap, vmin=vmin, vmax=vmax)
     ax.set(xlabel="x [cm]", ylabel="y [cm]", title=title)
     fig.colorbar(im, ax=ax, label=label)
     fig.tight_layout()
