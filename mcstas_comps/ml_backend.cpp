@@ -271,29 +271,35 @@ struct TorchState {
     TorchState() : device(torch::kCPU) {}
 };
 
-// "auto" picks CUDA when available and CPU otherwise. MPS is only used when
-// asked for by name.
+// "auto" picks CUDA, then MPS, and falls back to CPU.
 torch::Device pick_torch_device(const char* device, int verbose)
 {
     const char* name = (device != NULL && device[0] != '\0') ? device : "auto";
+    const bool is_auto = strcmp(name, "auto") == 0;
+    const bool want_cuda = is_auto || strcmp(name, "cuda") == 0;
+    const bool want_mps = is_auto || strcmp(name, "mps") == 0;
 
-    if (strcmp(name, "auto") == 0 || strcmp(name, "cuda") == 0) {
+    if (want_cuda) {
         if (torch::cuda::is_available()) {
             if (verbose) printf("ml_backend (torch): using cuda\n");
             return torch::Device(torch::kCUDA);
         }
-        if (strcmp(name, "cuda") == 0) {
+        if (!is_auto) {
             fprintf(stderr, "ml_backend (torch): requested device 'cuda' unavailable; falling back to CPU\n");
         }
-    } else if (strcmp(name, "mps") == 0) {
+    }
+    if (want_mps) {
 #ifdef __APPLE__
         if (torch::hasMPS()) {
             if (verbose) printf("ml_backend (torch): using mps\n");
             return torch::Device(torch::kMPS);
         }
 #endif
-        fprintf(stderr, "ml_backend (torch): requested device 'mps' unavailable; falling back to CPU\n");
-    } else if (strcmp(name, "cpu") != 0) {
+        if (!is_auto) {
+            fprintf(stderr, "ml_backend (torch): requested device 'mps' unavailable; falling back to CPU\n");
+        }
+    }
+    if (!want_cuda && !want_mps && strcmp(name, "cpu") != 0) {
         fprintf(stderr, "ml_backend (torch): unknown device '%s'; falling back to CPU\n", name);
     }
 

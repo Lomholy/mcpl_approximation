@@ -59,7 +59,7 @@
 *                       (CoreML is deliberately excluded from "auto" -- see
 *                       above); or force one of "cuda"/"rocm"/"coreml"/"cpu"
 *                       explicitly. For backend "torch", "auto" picks CUDA,
-*                       then CPU; or force one of "cuda"/"mps"/"cpu".
+*                       then MPS, then CPU; or force one of "cuda"/"mps"/"cpu".
 * batch_size: [1]      Number of neutrons sampled per model call.
 * verbose: [1]         Print progress/timing information.
 * GPU_verbose: [1]     Raise the ONNX Runtime session log severity
