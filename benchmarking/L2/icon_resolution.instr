@@ -1,0 +1,161 @@
+/********************************************************************************
+*
+* Instrument icon_resolution
+*
+* %Identification
+* Written by: Daniel Lomholt Christensen
+* Date: October 2026
+* Origin: UCPH @ NBI
+* %INSTRUMENT_SITE: Generated_instruments
+*
+* Resolution test of the PSI_ICON MCPL file recorded just before the sample
+* position. The source is either the MCPL file (MCPL_input) or a trained model
+* (Source_ML), placed so the stored neutron coordinates are used as-is. An
+* opaque mask with sharp edges and small features sits 1 mm downstream of the
+* recording plane, and the transmitted signal is recorded on a PSD flush against
+* the mask and on a PSD further downstream, where the divergence of the beam
+* blurs the edges.
+*
+* The mask covers the 14 mm x 14 mm beam. Coordinates are in mm from the beam
+* centre (u along x, v along y):
+*
+*   upper left   Siemens star, centre (-3.5, 3.5), radius 3.0, 24 spokes.
+*                The spoke period 2 pi r / 24 falls from 0.78 mm at the rim
+*                to below the pixel size at the centre.
+*   upper right  Line pairs with period 0.8, 0.4, 0.2 and 0.1 mm (bars half a
+*                period wide): vertical bars for v in [4, 6] and horizontal
+*                bars for v in [2, 4], one group of 1.2 mm per period.
+*   lower left   A 3 mm x 3 mm absorbing square for the edge response along x
+*                and y, and a straight edge tilted by 5 degrees from vertical
+*                for a slanted-edge measurement.
+*   lower right  An absorbing block, v in [-6, -1], with vertical slits of
+*                width 0.5, 0.25, 0.1 and 0.05 mm (v in [-5.5, -3]) and square
+*                holes of side 0.4, 0.3, 0.2 and 0.1 mm (centred on v = -2).
+*
+* %Parameters
+* run_from_mcpl: [str]  MCPL file used as source when use_ml is 0.
+* use_ml:        [1]    0: MCPL_input source, 1: Source_ML source.
+* run_ml:        [str]  Exported model used as source when use_ml is 1.
+* ml_device:     [str]  Device Source_ML runs the model on, see Source_ML.comp.
+* psd_gap:       [m]    Distance from the mask to the PSD flush against it.
+* psd_far_gap:   [m]    Distance from the mask to the far PSD.
+* mask_transmission: [1] Transmission of the absorbing parts of the mask. 0 is opaque.
+*
+* %End
+********************************************************************************/
+
+DEFINE INSTRUMENT icon_resolution (
+string run_from_mcpl = "../../data_files/mcpl_files/PSI_ICON.mcpl.gz",
+int use_ml = 0,
+string run_ml = "../../data_files/models/CFM_sampler.pt",
+string ml_device = "auto",
+psd_gap = 0.001,
+psd_far_gap = 0.05,
+mask_transmission = 0
+)
+
+DECLARE
+%{
+double z_file;
+double beam_y;
+double mask_gap;
+double mask_t;
+%}
+
+INITIALIZE
+%{
+z_file = -3.2148334;
+beam_y = 0.0075;
+mask_gap = 0.001;
+mask_t = mask_transmission;
+%}
+
+TRACE
+
+COMPONENT MCPL_source = MCPL_input(
+ filename = run_from_mcpl) WHEN (!use_ml)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT ml_src = Source_ML(
+ ML_filename = run_ml,
+ device = ml_device,
+ verbose = 0) WHEN (use_ml)
+AT (0, 0, 0) ABSOLUTE
+
+COMPONENT mask = Arm()
+AT (0, beam_y, z_file + mask_gap) ABSOLUTE
+EXTEND %{
+  PROP_Z0;
+  const double periods[4] = {0.8, 0.4, 0.2, 0.1};
+  const double slit_widths[4] = {0.5, 0.25, 0.1, 0.05};
+  const double hole_sizes[4] = {0.4, 0.3, 0.2, 0.1};
+  double u = x * 1e3;
+  double v = y * 1e3;
+  int mask_blocked = 0;
+
+  // Siemens star
+  double du = u + 3.5;
+  double dv = v - 3.5;
+  if (du * du + dv * dv < 3.0 * 3.0) {
+    int sector = (int)floor(atan2(dv, du) / (M_PI / 24.0));
+    mask_blocked = (sector & 1);
+  }
+
+  // Line pairs
+  for (int g = 0; g < 4; g++) {
+    double u0 = 1.0 + 1.25 * g;
+    if (u >= u0 && u < u0 + 1.2) {
+      if (v >= 4.0 && v < 6.0) {
+        int bar = (int)floor((u - u0) / (periods[g] / 2));
+        if (!(bar & 1)) mask_blocked = 1;
+      }
+      if (v >= 2.0 && v < 4.0) {
+        int bar = (int)floor((v - 2.0) / (periods[g] / 2));
+        if (!(bar & 1)) mask_blocked = 1;
+      }
+    }
+  }
+
+  // Square and slanted edge
+  if (u >= -6.0 && u < -3.0 && v >= -6.0 && v < -3.0) mask_blocked = 1;
+  if (u >= -2.5 && u < 0.5 && v >= -6.0 && v < -3.0) {
+    double tilt = 5.0 * M_PI / 180.0;
+    if ((u + 1.0) * cos(tilt) - (v + 4.5) * sin(tilt) > 0) mask_blocked = 1;
+  }
+
+  // Slits and holes in an absorbing block
+  if (u >= 1.0 && u < 6.0 && v >= -6.0 && v < -1.0) {
+    mask_blocked = 1;
+    for (int g = 0; g < 4; g++) {
+      double uc = 1.8 + 0.8 * g;
+      if (fabs(u - uc) < slit_widths[g] / 2 && v >= -5.5 && v < -3.0) mask_blocked = 0;
+      if (fabs(u - uc) < hole_sizes[g] / 2 && fabs(v + 2.0) < hole_sizes[g] / 2) mask_blocked = 0;
+    }
+  }
+
+  if (mask_blocked) {
+    if (mask_t > 0) {
+      p *= mask_t;
+    } else {
+      ABSORB;
+    }
+  }
+%}
+
+COMPONENT PSD_flush = PSD_monitor(
+ nx = 400, ny = 400, filename = "psd_flush.dat",
+ xwidth = 0.016, yheight = 0.016,
+ restore_neutron = 1)
+AT (0, 0, psd_gap) RELATIVE mask
+
+COMPONENT PSD_far = PSD_monitor(
+ nx = 400, ny = 400, filename = "psd_far.dat",
+ xwidth = 0.016, yheight = 0.016,
+ restore_neutron = 1)
+AT (0, 0, psd_far_gap) RELATIVE mask
+
+FINALLY
+%{
+%}
+
+END
