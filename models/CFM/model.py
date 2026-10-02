@@ -3,16 +3,27 @@ import torch
 import torch.nn.functional as F
 
 
+class Linear(nn.Linear):
+    """nn.Linear computed as x @ W.T + b. torch.nn.functional.linear with a bias
+    returns wrong values on MPS in some PyTorch builds (verified on 2.13.0),
+    while the matmul form is exact. The parameters and state_dict keys are
+    those of nn.Linear."""
+
+    def forward(self, x):
+        return x @ self.weight.t() + self.bias
+
+
+
 # Define the model
 class ResBlock(nn.Module):
     def __init__(self, width, emb_dim):
         super().__init__()
 
         self.norm = nn.Identity(width)
-        self.emb = nn.Linear(emb_dim, 2 * width)
+        self.emb = Linear(emb_dim, 2 * width)
 
-        self.fc1 = nn.Linear(width, 4 * width)
-        self.fc2 = nn.Linear(4 * width, width)
+        self.fc1 = Linear(width, 4 * width)
+        self.fc2 = Linear(4 * width, width)
 
     def forward(self, x, e):
         scale, shift = self.emb(e).chunk(2, dim=-1)
@@ -37,20 +48,20 @@ class VelocityField(nn.Module):
         self.input_dim = input_dim
 
         self.time_mlp = nn.Sequential(
-            nn.Linear(1, 64),
+            Linear(1, 64),
             nn.SiLU(),
-            nn.Linear(64, 64),
+            Linear(64, 64),
             nn.SiLU(),
-            nn.Linear(64, width),
+            Linear(64, width),
         )
 
-        self.in_proj = nn.Linear(input_dim, width)
+        self.in_proj = Linear(input_dim, width)
         self.blocks = nn.ModuleList([ResBlock(width, width) for _ in range(depth)])
 
         self.out = nn.Sequential(
             nn.Identity(width),
             nn.SiLU(),
-            nn.Linear(width, input_dim),
+            Linear(width, input_dim),
         )
 
         nn.init.zeros_(self.out[-1].weight)

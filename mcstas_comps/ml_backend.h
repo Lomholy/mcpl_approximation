@@ -53,8 +53,8 @@ typedef double (*MLRandNormFn)(void* rng_state);
  *
  * `device` selects where the model runs. For ONNX Runtime it is the
  * execution provider: "auto" picks CUDA, then ROCm, falling back to CPU; or
- * force one of "cuda"/"rocm"/"coreml"/"cpu". For LibTorch, "auto" picks CUDA
- * and falls back to CPU; or force one of "cuda"/"mps"/"cpu". A device that is
+ * force one of "cuda"/"rocm"/"coreml"/"cpu". For LibTorch, "auto" picks CUDA,
+ * then MPS, and falls back to CPU; or force one of "cuda"/"mps"/"cpu". A device that is
  * unavailable or unknown to the resolved backend falls back to CPU. May be
  * NULL, treated as "auto".
  *

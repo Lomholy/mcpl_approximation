@@ -2,12 +2,23 @@ import torch
 from torch.nn import functional as F
 from torch import nn as nn
 
+
+class Linear(nn.Linear):
+    """nn.Linear computed as x @ W.T + b. torch.nn.functional.linear with a bias
+    returns wrong values on MPS in some PyTorch builds (verified on 2.13.0),
+    while the matmul form is exact. The parameters and state_dict keys are
+    those of nn.Linear."""
+
+    def forward(self, x):
+        return x @ self.weight.t() + self.bias
+
+
 class ResBlock(nn.Module):
     def __init__(self, width):
         super().__init__()
         self.norm = nn.LayerNorm(width)
-        self.fc1 = nn.Linear(width, 4 * width)
-        self.fc2 = nn.Linear(4 * width, width)
+        self.fc1 = Linear(width, 4 * width)
+        self.fc2 = Linear(4 * width, width)
 
     def forward(self, x):
         y = self.norm(x)
@@ -21,16 +32,16 @@ class VAE(nn.Module):
         self.lat_dim = latent_dim
 
         # Encoder
-        self.in_proj = nn.Linear(input_dim, width)
+        self.in_proj = Linear(input_dim, width)
         self.enc_blocks = nn.ModuleList([ResBlock(width) for _ in range(depth)])
 
-        self.fc_mu  = nn.Linear(width, latent_dim)
-        self.fc_sig = nn.Linear(width, latent_dim)
+        self.fc_mu  = Linear(width, latent_dim)
+        self.fc_sig = Linear(width, latent_dim)
 
         # Decoder
-        self.dec_in = nn.Linear(latent_dim, width)
+        self.dec_in = Linear(latent_dim, width)
         self.dec_blocks = nn.ModuleList([ResBlock(width) for _ in range(depth)])
-        self.dec_out = nn.Linear(width, input_dim)
+        self.dec_out = Linear(width, input_dim)
 
     def encode(self, x):
         x = self.in_proj(x)
