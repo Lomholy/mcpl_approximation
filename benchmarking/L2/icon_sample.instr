@@ -28,7 +28,10 @@
 * zp_rad:        [m]    Radius of the zone plate.
 * zp_eta:        [1]    Efficiency of the zone plate.
 * lambda_design: [AA]   Design wavelength of the zone plate.
-* focus_design:  [m]    Focal length at the design wavelength. The focal PSD sits here.
+* focus_design:  [m]    Focal length at the design wavelength. Together with lambda_design this
+*                       sets the outermost zone width of the plate.
+* lambda_focus:  [AA]   Wavelength whose focal length f = 2 rad dr / lambda the focal PSD sits at.
+*                       0 uses lambda_design.
 *
 * %End
 ********************************************************************************/
@@ -41,7 +44,8 @@ string ml_device = "auto",
 zp_rad = 0.0105,
 zp_eta = 0.2,
 lambda_design = 6.0,
-focus_design = 1.0
+focus_design = 1.0,
+lambda_focus = 0
 )
 
 DECLARE
@@ -50,6 +54,7 @@ double z_file;
 double beam_y;
 double plate_gap;
 double zp_dr;
+double psd_focus_z;
 double psd_gap;
 %}
 
@@ -60,7 +65,8 @@ beam_y = 0.0075;
 plate_gap = 0.001;
 psd_gap = 0.001;
 zp_dr = focus_design * lambda_design * 1e-10 / (2 * zp_rad);
-printf("Zone plate outermost zone width: %g m\n", zp_dr);
+psd_focus_z = 2 * zp_rad * zp_dr / ((lambda_focus > 0 ? lambda_focus : lambda_design) * 1e-10);
+printf("Zone plate outermost zone width: %g m, focal PSD at %g m\n", zp_dr, psd_focus_z);
 %}
 
 TRACE
@@ -92,7 +98,7 @@ COMPONENT PSD_focus = PSD_monitor(
  nx = 200, ny = 200, filename = "psd_focus.dat",
  xwidth = 0.02, yheight = 0.02,
  restore_neutron = 1)
-AT (0, 0, focus_design) RELATIVE plate_position
+AT (0, 0, psd_focus_z) RELATIVE plate_position
 
 FINALLY
 %{
